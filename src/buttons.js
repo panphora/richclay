@@ -1,22 +1,32 @@
-const iconAttrs = 'viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"';
+// Toolbar icons in the OverType / Quill style (18×18, stroke-based). OverType's
+// set covers bold, italic, code, link, lists and quote verbatim; underline,
+// strikethrough and clear-formatting come from Quill (its upstream source) with
+// the ql-stroke/ql-fill classes inlined. Neither ships undo/redo, so those are
+// drawn here in the same stroke style with proper chevron arrowheads.
+const S = 'stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"';
+const STHIN = 'stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"';
+const F = 'fill="currentColor"';
+
+const svg = (inner, viewBox = "0 0 18 18") =>
+  `<svg viewBox="${viewBox}" width="18" height="18" aria-hidden="true" focusable="false">${inner}</svg>`;
 
 const icons = {
-  bold: `<svg ${iconAttrs}><path fill="currentColor" d="M7 4h6.2c2.9 0 4.7 1.5 4.7 3.8 0 1.5-.8 2.7-2.1 3.3 1.7.5 2.7 1.9 2.7 3.8 0 3-2.2 5.1-5.5 5.1H7V4Zm3 6h3c1.2 0 1.9-.6 1.9-1.6S14.2 7 13 7h-3v3Zm0 7h3.3c1.4 0 2.2-.8 2.2-2s-.8-2-2.2-2H10v4Z"/></svg>`,
-  italic: `<svg ${iconAttrs}><path fill="currentColor" d="M10 4h9v3h-3.2l-3.5 10H15v3H6v-3h3.2l3.5-10H10V4Z"/></svg>`,
-  underline: `<svg ${iconAttrs}><path fill="currentColor" d="M7 4h3v7.2c0 2 1 3.1 3 3.1s3-1.1 3-3.1V4h3v7.3c0 3.7-2.4 6-6 6s-6-2.3-6-6V4Zm0 15h12v2H7v-2Z"/></svg>`,
-  strike: `<svg ${iconAttrs}><path fill="currentColor" d="M6 11h12v2H6v-2Zm6.2-7c2.2 0 3.9.7 5.1 2.1l-2 2c-.8-.8-1.8-1.2-3.1-1.2-1.4 0-2.2.5-2.2 1.4 0 .6.3 1 1 1.3H7.7c-.4-.6-.6-1.3-.6-2.1C7.1 5.4 9.1 4 12.2 4Zm4.7 10.8c.2.5.3 1 .3 1.6 0 2.3-2 3.8-5.1 3.8-2.5 0-4.5-.8-5.9-2.4l2.1-2c1 1 2.2 1.5 3.8 1.5 1.4 0 2.2-.5 2.2-1.4 0-.4-.2-.8-.6-1.1h3.2Z"/></svg>`,
-  link: `<svg ${iconAttrs}><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2" d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1M14 11a5 5 0 0 0-7.1 0l-2 2a5 5 0 0 0 7.1 7.1l1.1-1.1"/></svg>`,
-  unlink: `<svg ${iconAttrs}><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2" d="M15 7h1a4 4 0 0 1 0 8h-2M9 17H8a4 4 0 0 1 0-8h2M8 2l8 20M9.5 12h5"/></svg>`,
-  ul: `<svg ${iconAttrs}><path fill="currentColor" d="M5 7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm4-2h11v2H9V5Zm-4 8a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm4-2h11v2H9v-2Zm-4 8a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm4-2h11v2H9v-2Z"/></svg>`,
-  ol: `<svg ${iconAttrs}><path fill="currentColor" d="M4 4h2v5H4V7H3V5h1V4Zm5 1h11v2H9V5Zm-6 6h4v2H5v1h2v2H3v-3h2v-1H3v-1Zm6 1h11v2H9v-2Zm-6 6h4v2H3v-2Zm6 0h11v2H9v-2Z"/></svg>`,
-  quote: `<svg ${iconAttrs}><path fill="currentColor" d="M7 6h5v5H9.5c0 2 1 3.6 3 4.8L11 18c-3-1.7-4.5-4.1-4.5-7.2V6H7Zm9 0h5v5h-2.5c0 2 1 3.6 3 4.8L20 18c-3-1.7-4.5-4.1-4.5-7.2V6h.5Z"/></svg>`,
-  undo: `<svg ${iconAttrs}><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7H4v5m.5-4.5A8 8 0 1 1 4 16"/></svg>`,
-  redo: `<svg ${iconAttrs}><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7h5v5m-.5-4.5A8 8 0 1 0 20 16"/></svg>`,
-  clear: `<svg ${iconAttrs}><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13M10 11l4 4m0-4-4 4"/></svg>`,
-  code: `<svg ${iconAttrs}><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m8 9-4 3 4 3m8-6 4 3-4 3m-2-8-4 10"/></svg>`,
-  indent: `<svg ${iconAttrs}><path fill="currentColor" d="M4 5h16v2H4V5Zm8 4h8v2h-8V9Zm0 4h8v2h-8v-2ZM4 17h16v2H4v-2Zm0-8 4 3-4 3V9Z"/></svg>`,
-  outdent: `<svg ${iconAttrs}><path fill="currentColor" d="M4 5h16v2H4V5Zm8 4h8v2h-8V9Zm0 4h8v2h-8v-2ZM4 17h16v2H4v-2Zm4-8v6l-4-3 4-3Z"/></svg>`,
-  blocks: `<svg ${iconAttrs}><path fill="currentColor" d="M4 4h16v3H4V4Zm0 6h11v3H4v-3Zm0 6h16v3H4v-3Z"/></svg>`
+  bold: svg(`<path ${S} d="M5,4H9.5A2.5,2.5,0,0,1,12,6.5v0A2.5,2.5,0,0,1,9.5,9H5A0,0,0,0,1,5,9V4A0,0,0,0,1,5,4Z"/><path ${S} d="M5,9h5.5A2.5,2.5,0,0,1,13,11.5v0A2.5,2.5,0,0,1,10.5,14H5a0,0,0,0,1,0,0V9A0,0,0,0,1,5,9Z"/>`),
+  italic: svg(`<line ${S} x1="7" x2="13" y1="4" y2="4"/><line ${S} x1="5" x2="11" y1="14" y2="14"/><line ${S} x1="8" x2="10" y1="14" y2="4"/>`),
+  underline: svg(`<path ${S} d="M5,3V9a4.012,4.012,0,0,0,4,4H9a4.012,4.012,0,0,0,4-4V3"/><rect ${F} height="1" rx="0.5" ry="0.5" width="12" x="3" y="15"/>`),
+  strike: svg(`<line ${STHIN} x1="15.5" x2="2.5" y1="8.5" y2="9.5"/><path ${F} d="M9.007,8C6.542,7.791,6,7.519,6,6.5,6,5.792,7.283,5,9,5c1.571,0,2.765.679,2.969,1.309a1,1,0,0,0,1.9-.617C13.356,4.106,11.354,3,9,3,6.2,3,4,4.538,4,6.5a3.2,3.2,0,0,0,.5,1.843Z"/><path ${F} d="M8.984,10C11.457,10.208,12,10.479,12,11.5c0,0.708-1.283,1.5-3,1.5-1.571,0-2.765-.679-2.969-1.309a1,1,0,1,0-1.9.617C4.644,13.894,6.646,15,9,15c2.8,0,5-1.538,5-3.5a3.2,3.2,0,0,0-.5-1.843Z"/>`),
+  link: svg(`<line ${S} x1="7" x2="11" y1="7" y2="11"/><path ${S} d="M8.9,4.577a3.476,3.476,0,0,1,.36,4.679A3.476,3.476,0,0,1,4.577,8.9C3.185,7.5,2.035,6.4,4.217,4.217S7.5,3.185,8.9,4.577Z"/><path ${S} d="M13.423,9.1a3.476,3.476,0,0,0-4.679-.36,3.476,3.476,0,0,0,.36,4.679c1.392,1.392,2.5,2.542,4.679.36S14.815,10.5,13.423,9.1Z"/>`),
+  unlink: svg(`<line ${S} x1="4" x2="14" y1="14.5" y2="3.5"/><path ${S} d="M8.9,4.577a3.476,3.476,0,0,1,.953,3.123"/><path ${S} d="M9.1,13.423a3.476,3.476,0,0,1-4.523-.523C3.185,11.5,2.035,10.4,4.217,8.217"/>`),
+  ul: svg(`<line ${S} x1="6" x2="15" y1="4" y2="4"/><line ${S} x1="6" x2="15" y1="9" y2="9"/><line ${S} x1="6" x2="15" y1="14" y2="14"/><line ${S} x1="3" x2="3" y1="4" y2="4"/><line ${S} x1="3" x2="3" y1="9" y2="9"/><line ${S} x1="3" x2="3" y1="14" y2="14"/>`),
+  ol: svg(`<line ${S} x1="7" x2="15" y1="4" y2="4"/><line ${S} x1="7" x2="15" y1="9" y2="9"/><line ${S} x1="7" x2="15" y1="14" y2="14"/><line ${STHIN} x1="2.5" x2="4.5" y1="5.5" y2="5.5"/><path ${F} d="M3.5,6A0.5,0.5,0,0,1,3,5.5V3.085l-0.276.138A0.5,0.5,0,0,1,2.053,3c-0.124-.247-0.023-0.324.224-0.447l1-.5A0.5,0.5,0,0,1,4,2.5v3A0.5,0.5,0,0,1,3.5,6Z"/><path ${STHIN} d="M4.5,10.5h-2c0-.234,1.85-1.076,1.85-2.234A0.959,0.959,0,0,0,2.5,8.156"/><path ${STHIN} d="M2.5,14.846a0.959,0.959,0,0,0,1.85-.109A0.7,0.7,0,0,0,3.75,14a0.688,0.688,0,0,0,.6-0.736,0.959,0.959,0,0,0-1.85-.109"/>`),
+  quote: svg(`<path ${S} d="M10 10.8182L9 10.8182C8.80222 10.8182 8.60888 10.7649 8.44443 10.665C8.27998 10.5651 8.15181 10.4231 8.07612 10.257C8.00043 10.0909 7.98063 9.90808 8.01922 9.73174C8.0578 9.55539 8.15304 9.39341 8.29289 9.26627C8.43275 9.13913 8.61093 9.05255 8.80491 9.01747C8.99889 8.98239 9.19996 9.00039 9.38268 9.0692C9.56541 9.13801 9.72159 9.25453 9.83147 9.40403C9.94135 9.55353 10 9.72929 10 9.90909L10 12.1818C10 12.664 9.78929 13.1265 9.41421 13.4675C9.03914 13.8084 8.53043 14 8 14"/><path ${S} d="M16 10.8182L15 10.8182C14.8022 10.8182 14.6089 10.7649 14.4444 10.665C14.28 10.5651 14.1518 10.4231 14.0761 10.257C14.0004 10.0909 13.9806 9.90808 14.0192 9.73174C14.0578 9.55539 14.153 9.39341 14.2929 9.26627C14.4327 9.13913 14.6109 9.05255 14.8049 9.01747C14.9989 8.98239 15.2 9.00039 15.3827 9.0692C15.5654 9.13801 15.7216 9.25453 15.8315 9.40403C15.9414 9.55353 16 9.72929 16 9.90909L16 12.1818C16 12.664 15.7893 13.1265 15.4142 13.4675C15.0391 13.8084 14.5304 14 14 14"/>`, "2 2 20 20"),
+  undo: svg(`<polyline ${S} points="6.5 4 3.5 7 6.5 10"/><path ${S} d="M3.5 7H10a3.5 3.5 0 0 1 0 7H7"/>`),
+  redo: svg(`<polyline ${S} points="11.5 4 14.5 7 11.5 10"/><path ${S} d="M14.5 7H8a3.5 3.5 0 0 0 0 7h3"/>`),
+  clear: svg(`<line ${S} x1="5" x2="13" y1="3" y2="3"/><line ${S} x1="6" x2="9.35" y1="12" y2="3"/><line ${S} x1="11" x2="15" y1="11" y2="15"/><line ${S} x1="15" x2="11" y1="11" y2="15"/><rect ${F} height="1" rx="0.5" ry="0.5" width="7" x="2" y="14"/>`),
+  code: svg(`<polyline ${S} points="5 7 3 9 5 11"/><polyline ${S} points="13 7 15 9 13 11"/><line ${S} x1="10" x2="8" y1="5" y2="13"/>`),
+  indent: svg(`<line ${S} x1="3" x2="15" y1="4" y2="4"/><line ${S} x1="8" x2="15" y1="9" y2="9"/><line ${S} x1="3" x2="15" y1="14" y2="14"/><polyline ${S} points="3 7 5.5 9 3 11"/>`),
+  outdent: svg(`<line ${S} x1="3" x2="15" y1="4" y2="4"/><line ${S} x1="8" x2="15" y1="9" y2="9"/><line ${S} x1="3" x2="15" y1="14" y2="14"/><polyline ${S} points="5.5 7 3 9 5.5 11"/>`),
+  blocks: svg(`<line ${S} x1="3" x2="15" y1="4" y2="4"/><line ${S} x1="3" x2="15" y1="9" y2="9"/><line ${S} x1="3" x2="10" y1="14" y2="14"/>`)
 };
 
 export const presets = {
