@@ -1,0 +1,286 @@
+:root {
+  --richclay-surface: #ffffff;
+  --richclay-surface-alt: #f6f7f9;
+  --richclay-text: #1d2430;
+  --richclay-muted: #667085;
+  --richclay-border: #c9ced8;
+  --richclay-accent: #0f766e;
+  --richclay-accent-ink: #ffffff;
+  --richclay-focus: #2563eb;
+  --richclay-danger: #b42318;
+  --richclay-radius: 6px;
+  --richclay-control-size: 34px;
+  --richclay-shadow: 0 10px 24px rgb(15 23 42 / 0.16);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --richclay-surface: #16181d;
+    --richclay-surface-alt: #22252c;
+    --richclay-text: #f2f4f7;
+    --richclay-muted: #a3aab8;
+    --richclay-border: #4a5260;
+    --richclay-accent: #2dd4bf;
+    --richclay-accent-ink: #05201d;
+    --richclay-focus: #93c5fd;
+    --richclay-shadow: 0 12px 28px rgb(0 0 0 / 0.35);
+  }
+}
+
+.richclay-toolbar {
+  align-items: center;
+  background: var(--richclay-surface-alt);
+  border: 1px solid var(--richclay-border);
+  border-radius: var(--richclay-radius);
+  color: var(--richclay-text);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-block: 0 6px;
+  padding: 4px;
+}
+
+.richclay-button {
+  align-items: center;
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: currentColor;
+  display: inline-flex;
+  height: var(--richclay-control-size);
+  justify-content: center;
+  margin: 0;
+  min-width: var(--richclay-control-size);
+  padding: 0;
+  position: relative;
+}
+
+.richclay-button:hover,
+.richclay-button[aria-expanded="true"],
+.richclay-menu-item:hover {
+  background: var(--richclay-surface);
+  border-color: var(--richclay-border);
+}
+
+.richclay-button.is-active,
+.richclay-button[aria-pressed="true"],
+.richclay-menu-item.is-active {
+  background: var(--richclay-accent);
+  border-color: var(--richclay-accent);
+  color: var(--richclay-accent-ink);
+}
+
+.richclay-button:focus-visible,
+.richclay-menu-item:focus-visible,
+.richclay-editor:focus-visible,
+.richclay-input:focus-visible,
+.richclay-primary:focus-visible,
+.richclay-secondary:focus-visible {
+  outline: 3px solid var(--richclay-focus);
+  outline-offset: 2px;
+}
+
+.richclay-button:disabled {
+  color: var(--richclay-muted);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.richclay-separator {
+  align-self: stretch;
+  background: var(--richclay-border);
+  display: inline-block;
+  margin: 5px 4px;
+  width: 1px;
+}
+
+.richclay-menu-wrap {
+  display: inline-flex;
+  position: relative;
+}
+
+.richclay-menu {
+  background: var(--richclay-surface);
+  border: 1px solid var(--richclay-border);
+  border-radius: var(--richclay-radius);
+  box-shadow: var(--richclay-shadow);
+  color: var(--richclay-text);
+  display: grid;
+  gap: 2px;
+  inset-block-start: calc(100% + 4px);
+  inset-inline-start: 0;
+  min-width: 160px;
+  padding: 4px;
+  position: absolute;
+  z-index: 1000;
+}
+
+.richclay-menu[hidden] {
+  display: none;
+}
+
+.richclay-menu-item {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: inherit;
+  font: inherit;
+  min-height: 32px;
+  padding: 5px 9px;
+  text-align: start;
+}
+
+.richclay-editor {
+  background: var(--richclay-surface);
+  border: 1px solid var(--richclay-border);
+  border-radius: var(--richclay-radius);
+  color: var(--richclay-text);
+  min-height: 9rem;
+  padding: 12px;
+  position: relative;
+}
+
+.richclay-editor.richclay-empty::before {
+  color: var(--richclay-muted);
+  content: attr(data-richclay-placeholder);
+  inset-block-start: 12px;
+  inset-inline-start: 12px;
+  pointer-events: none;
+  position: absolute;
+}
+
+.richclay-editor p,
+.richclay-editor h1,
+.richclay-editor h2,
+.richclay-editor h3,
+.richclay-editor h4,
+.richclay-editor h5,
+.richclay-editor h6,
+.richclay-editor blockquote,
+.richclay-editor pre,
+.richclay-editor ul,
+.richclay-editor ol {
+  margin-block: 0 0.75em;
+}
+
+.richclay-editor > :last-child {
+  margin-block-end: 0;
+}
+
+.richclay-editor blockquote {
+  border-inline-start: 3px solid var(--richclay-border);
+  color: var(--richclay-muted);
+  margin-inline: 0;
+  padding-inline-start: 12px;
+}
+
+.richclay-editor pre {
+  background: var(--richclay-surface-alt);
+  border-radius: 4px;
+  overflow: auto;
+  padding: 10px;
+}
+
+.richclay-dialog {
+  background: var(--richclay-surface);
+  border: 1px solid var(--richclay-border);
+  border-radius: var(--richclay-radius);
+  box-shadow: var(--richclay-shadow);
+  color: var(--richclay-text);
+  display: grid;
+  gap: 10px;
+  margin-block: 6px;
+  max-width: 420px;
+  padding: 12px;
+}
+
+.richclay-dialog-title {
+  font-weight: 650;
+}
+
+.richclay-field {
+  display: grid;
+  gap: 4px;
+}
+
+.richclay-field span {
+  color: var(--richclay-muted);
+  font-size: 0.875rem;
+}
+
+.richclay-input {
+  background: var(--richclay-surface);
+  border: 1px solid var(--richclay-border);
+  border-radius: 4px;
+  color: var(--richclay-text);
+  font: inherit;
+  min-height: 36px;
+  padding: 6px 8px;
+}
+
+.richclay-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.richclay-primary,
+.richclay-secondary {
+  appearance: none;
+  border: 1px solid var(--richclay-border);
+  border-radius: 4px;
+  font: inherit;
+  min-height: 34px;
+  padding: 5px 10px;
+}
+
+.richclay-primary {
+  background: var(--richclay-accent);
+  border-color: var(--richclay-accent);
+  color: var(--richclay-accent-ink);
+}
+
+.richclay-secondary {
+  background: var(--richclay-surface-alt);
+  color: var(--richclay-text);
+}
+
+.richclay-sr-only {
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+@media (forced-colors: active) {
+  .richclay-toolbar,
+  .richclay-editor,
+  .richclay-menu,
+  .richclay-dialog,
+  .richclay-input {
+    border-color: CanvasText;
+  }
+
+  .richclay-button.is-active,
+  .richclay-button[aria-pressed="true"],
+  .richclay-menu-item.is-active,
+  .richclay-primary {
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  .richclay-button:focus-visible,
+  .richclay-menu-item:focus-visible,
+  .richclay-editor:focus-visible,
+  .richclay-input:focus-visible {
+    outline-color: Highlight;
+  }
+}

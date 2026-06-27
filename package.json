@@ -1,0 +1,57 @@
+{
+  "name": "richclay",
+  "version": "0.1.0",
+  "description": "Hyperclay-compatible DOM-first rich text editor built on Squire.",
+  "type": "module",
+  "license": "MIT",
+  "author": "David Miranda",
+  "homepage": "https://github.com/panphora/richclay#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/panphora/richclay.git"
+  },
+  "bugs": {
+    "url": "https://github.com/panphora/richclay/issues"
+  },
+  "keywords": [
+    "rich-text-editor",
+    "wysiwyg",
+    "contenteditable",
+    "squire",
+    "dompurify",
+    "hyperclay",
+    "malleable-html",
+    "dom-first"
+  ],
+  "main": "src/richclay.js",
+  "module": "src/richclay.js",
+  "exports": {
+    ".": "./src/richclay.js",
+    "./richclay.js": "./richclay.js",
+    "./richclay.css": "./richclay.css",
+    "./styles.css": "./richclay.css"
+  },
+  "files": [
+    "src/**/*.js",
+    "richclay.js",
+    "richclay.css",
+    "vendor/**",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build:global": "esbuild src/browser-global.js --bundle --format=iife --global-name=RichClayBundle --outfile=richclay.js --banner:js='/* richclay global build. Source lives in src/. Run npm run build to regenerate. */' --footer:js='window.RichClay = RichClayBundle.default;'",
+    "build:vendor": "esbuild src/vendor-bundle.js --bundle --minify --format=iife --global-name=richclay --outfile=dist/richclay.min.js --banner:js='/* richclay self-contained vendor build (bundles Squire + DOMPurify) for hyperclayjs. Generated; do not edit. */'",
+    "build": "npm run build:global && npm run build:vendor",
+    "copy-to-hyperclayjs": "npm run build && node scripts/copy-to-hyperclayjs.js",
+    "prepublishOnly": "npm run build:global",
+    "test": "node --test tests/*.test.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.5",
+    "jsdom": "^26.1.0"
+  }
+}
