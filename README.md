@@ -114,8 +114,7 @@ Options:
 Presets:
 
 - `minimal`: bold, italic, link, unordered list.
-- `standard`: block menu, inline formatting, link, lists, quote, undo/redo, clear formatting.
-- `full`: standard plus code, unlink, indent, and outdent.
+- `standard`: block menu, inline formatting, inline code, link, unlink, lists, quote, indent/outdent, undo/redo, clear formatting.
 
 Toolbar arrays are the extension surface. Include built-in ids, omit ids to remove buttons, change order to reorder, and use `{ type: "separator" }` for an explicit separator.
 

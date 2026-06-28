@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>richclay — finalized (light + dark)</title>
+  <link rel="stylesheet" href="../richclay.css">
+  <style>
+    /* =====================================================================
+       The finalized richclay editor, shown in both themes side by side.
+         • Soft-press active state + seamless toolbar/body card now ship in
+           richclay.css itself — this page just instantiates plain editors.
+         • Colours borrowed from mirk-interface (its ink/canvas tones) and its
+           two-column light|dark layout: one .dark wrapper, one .light wrapper,
+           each forcing color-scheme and painting its own canvas.
+         • --richclay-text (the editable-area ink) is mapped to a high-contrast
+           value per column, separate from the warmer page chrome.
+       ===================================================================== */
+    :root { color-scheme: light dark; }
+
+    .rc-col.light {
+      color-scheme: light;
+      --rc-canvas: #F7F2EA;
+      --rc-fg: #15120E;
+      --rc-muted: #7F7366;
+      --rc-border: #C9BBA6;
+
+      --richclay-surface: #F7F2EA;
+      --richclay-surface-alt: #ECE3D4;
+      --richclay-text: #0B0E14;          /* high-contrast editable ink */
+      --richclay-muted: #7F7366;
+      --richclay-border: #B9A98E;
+      --richclay-focus: #2563EB;
+      --richclay-shadow: 0 10px 24px rgb(15 23 42 / 0.16);
+    }
+
+    .rc-col.dark {
+      color-scheme: dark;
+      --rc-canvas: #0B0C13;
+      --rc-fg: #F6F7F9;
+      --rc-muted: #8B91A7;
+      --rc-border: #3A4055;
+
+      --richclay-surface: #1D1F2F;
+      --richclay-surface-alt: #262A3D;
+      --richclay-text: #FFFFFF;          /* high-contrast editable ink */
+      --richclay-muted: #9AA1B6;
+      --richclay-border: #444A60;
+      --richclay-focus: #93C5FD;
+      --richclay-shadow: 0 12px 28px rgb(0 0 0 / 0.35);
+    }
+
+    /* ---- page chrome ---- */
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body { font: 15px/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+
+    .rc-grid { display: grid; grid-template-columns: 1fr 1fr; min-height: 100vh; }
+    .rc-col {
+      padding: 36px 34px 64px;
+      background: var(--rc-canvas);
+      color: var(--rc-fg);
+    }
+    .rc-col.light { border-left: 1px solid #00000014; }
+
+    .rc-mode {
+      font: 600 11px/1 ui-monospace, "SFMono-Regular", Menlo, monospace;
+      letter-spacing: 0.22em;
+      opacity: 0.55;
+      margin: 0;
+    }
+    .rc-col h1 { font-size: 28px; margin: 8px 0 8px; letter-spacing: -0.01em; }
+    .rc-lead { color: var(--rc-muted); max-width: 50ch; margin: 0 0 30px; }
+    .rc-lead b { color: var(--rc-fg); font-weight: 600; }
+
+    /* captions: a dedicated class so editor content <p> never inherits these */
+    .rc-note { color: var(--rc-muted); font-size: 13px; margin: 18px 0 10px; }
+
+    @media (max-width: 860px) {
+      .rc-grid { grid-template-columns: 1fr; }
+      .rc-col.light { border-left: 0; border-top: 1px solid #00000014; }
+    }
+  </style>
+</head>
+<body>
+  <div class="rc-grid">
+    <section class="rc-col dark"></section>
+    <section class="rc-col light"></section>
+  </div>
+
+  <script src="../vendor/purify.min.js"></script>
+  <script src="../vendor/squire.js"></script>
+  <script src="../richclay.js"></script>
+  <script>
+    const CONTENT = `
+      <h3>Meeting notes</h3>
+      <p>The DOM inside this region <strong>is</strong> the document. Edit any of it and richclay keeps clean, <em>semantic</em> HTML.</p>
+      <ul>
+        <li>Type to edit, just like a document.</li>
+        <li>Select text, then use the toolbar above.</li>
+        <li><strong>Bold</strong> and the list are switched on so you can see the active style.</li>
+      </ul>`;
+
+    function column(mode) {
+      const badge = mode === "dark" ? "DARK" : "LIGHT";
+      return `
+        <p class="rc-mode">${badge}</p>
+        <h1>richclay</h1>
+        <p class="rc-lead">The finalized editor: <b>soft-press</b> active state, toolbar and body fused into <b>one seamless card</b>, and high-contrast text in the editable area. Same build in both themes (mirk's ink/canvas colours, mirk's two-column light/dark layout).</p>
+        <p class="rc-note">Edit it, select text, toggle formatting — it's live.</p>
+        <div data-richclay>${CONTENT}</div>
+      `;
+    }
+
+    document.querySelector(".rc-col.dark").innerHTML = column("dark");
+    document.querySelector(".rc-col.light").innerHTML = column("light");
+
+    document.querySelectorAll("[data-richclay]").forEach(el => {
+      new RichClay(el, { hyperclay: false, toolbar: "standard", placeholder: "Write something" });
+    });
+  </script>
+</body>
+</html>

@@ -119,7 +119,7 @@ test("constructor validates its element and is idempotent per element", () => {
 
   const element = document.querySelector("[data-richclay]");
   const first = new RichClay(element, { Squire: FakeSquire, toolbar: "minimal" });
-  const second = new RichClay(element, { Squire: FakeSquire, toolbar: "full" });
+  const second = new RichClay(element, { Squire: FakeSquire, toolbar: "standard" });
 
   assert.equal(first, second);
   assert.equal(document.querySelectorAll("[data-richclay-toolbar]").length, 1);

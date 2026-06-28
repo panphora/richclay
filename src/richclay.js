@@ -239,7 +239,7 @@ export default class RichClay {
   }
 
   pathHas(tag) {
-    const path = this._squire?.getPath?.() || this.path || "";
+    const path = this._squire?.getPath?.() ?? this.path ?? "";
     return new RegExp(`(?:^|>)${tag}(?:[.#\\[]|>|$)`, "i").test(path);
   }
 
@@ -530,7 +530,7 @@ export default class RichClay {
 
   installShortcuts() {
     const seen = new Set();
-    this.resolveToolbarControls("full").forEach(def => {
+    this.resolveToolbarControls("standard").forEach(def => {
       if (def.type === "menu" || !def.shortcut || seen.has(def.id)) return;
       seen.add(def.id);
       shortcutKeys(def.shortcut).forEach(key => {

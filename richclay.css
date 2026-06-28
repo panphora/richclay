@@ -1,7 +1,7 @@
 :root {
   --richclay-surface: #ffffff;
   --richclay-surface-alt: #f6f7f9;
-  --richclay-text: #1d2430;
+  --richclay-text: #0b0e14;
   --richclay-muted: #667085;
   --richclay-border: #c9ced8;
   --richclay-accent: #0f766e;
@@ -17,7 +17,7 @@
   :root {
     --richclay-surface: #16181d;
     --richclay-surface-alt: #22252c;
-    --richclay-text: #f2f4f7;
+    --richclay-text: #ffffff;
     --richclay-muted: #a3aab8;
     --richclay-border: #4a5260;
     --richclay-accent: #2dd4bf;
@@ -38,6 +38,27 @@
   gap: 2px;
   margin-block: 0 6px;
   padding: 4px;
+}
+
+/* Seamless card: in the default layout the toolbar sits directly above the
+   editor. Fuse them into a single bordered card with one divider — the
+   toolbar's bottom border — instead of two stacked, separated boxes. */
+.richclay-toolbar:has(+ .richclay-editor) {
+  margin-block-end: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.richclay-toolbar + .richclay-editor {
+  border-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+/* In a fused card, draw the focus ring inside the body so it never crosses
+   the toolbar divider. */
+.richclay-toolbar + .richclay-editor:focus-visible {
+  outline-offset: -3px;
 }
 
 .richclay-button {
@@ -66,9 +87,10 @@
 .richclay-button.is-active,
 .richclay-button[aria-pressed="true"],
 .richclay-menu-item.is-active {
-  background: var(--richclay-accent);
-  border-color: var(--richclay-accent);
-  color: var(--richclay-accent-ink);
+  background: rgb(0 0 0 / 0.13);
+  border-color: rgb(0 0 0 / 0.22);
+  color: var(--richclay-text);
+  box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.26);
 }
 
 .richclay-button:focus-visible,
@@ -85,6 +107,19 @@
   color: var(--richclay-muted);
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+/* Remove-link icon: the standard link glyph with a diagonal cut painted in the
+   button's own background colour, so the chain reads as severed in every state.
+   The cut tracks the background the button shows: the toolbar surface at rest,
+   the raised surface on hover. */
+.richclay-cut {
+  stroke: var(--richclay-surface-alt);
+}
+
+.richclay-button:hover .richclay-cut,
+.richclay-button[aria-expanded="true"] .richclay-cut {
+  stroke: var(--richclay-surface);
 }
 
 .richclay-separator {
@@ -282,5 +317,9 @@
   .richclay-editor:focus-visible,
   .richclay-input:focus-visible {
     outline-color: Highlight;
+  }
+
+  .richclay-cut {
+    stroke: Canvas;
   }
 }

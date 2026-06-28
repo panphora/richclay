@@ -85,7 +85,7 @@ test("keyboard shortcuts register Ctrl-/Meta- bindings and run their command", (
       .map(([, key, fn]) => [key, fn])
   );
 
-  // Shortcuts come from the full preset regardless of the visible toolbar, and
+  // Shortcuts come from the standard preset regardless of the visible toolbar, and
   // every Mod+ shortcut binds both the Windows/Linux (Ctrl) and macOS (Meta) key.
   assert.equal(handlers.has("Ctrl-b"), true);
   assert.equal(handlers.has("Meta-b"), true);
