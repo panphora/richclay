@@ -878,9 +878,33 @@ var RichClayBundle = (() => {
     });
   }
 
+  // src/styles.js
+  var STYLE_ID = "richclay-styles";
+  var styledDocs = /* @__PURE__ */ new WeakSet();
+  var cssText = "";
+  function setRichClayStyles(text) {
+    cssText = text || "";
+  }
+  function ensureStyles(doc = document) {
+    if (!doc || styledDocs.has(doc)) return;
+    if (doc.getElementById(STYLE_ID)) {
+      styledDocs.add(doc);
+      return;
+    }
+    if (!cssText) return;
+    const style = doc.createElement("style");
+    style.id = STYLE_ID;
+    style.setAttribute("save-remove", "");
+    style.setAttribute("save-ignore", "");
+    style.textContent = cssText;
+    (doc.head || doc.documentElement).appendChild(style);
+    styledDocs.add(doc);
+  }
+
   // src/richclay.js
   var instances = /* @__PURE__ */ new WeakMap();
   var liveInstances = /* @__PURE__ */ new Set();
+  var autoInitWindows = /* @__PURE__ */ new WeakSet();
   var globalRegistry = createDefaultRegistry();
   var KEEP_FOCUS = Symbol("richclay-keep-focus");
   var dialogSeq = 0;
@@ -937,6 +961,20 @@ var RichClayBundle = (() => {
       const elements = resolveElements(selector);
       return elements.map((element) => new _RichClay(element, options));
     }
+    static autoInit(win = typeof window !== "undefined" ? window : void 0) {
+      if (!win || !win.document || autoInitWindows.has(win)) return;
+      autoInitWindows.add(win);
+      const run = () => {
+        if (shouldUseHyperclay({}, win) && isHyperclayEditMode(win)) {
+          _RichClay.init();
+        }
+      };
+      if (win.document.readyState === "loading") {
+        win.document.addEventListener("DOMContentLoaded", run, { once: true });
+      } else {
+        run();
+      }
+    }
     static registerButton(def) {
       validateButton(def);
       globalRegistry.set(def.id, def);
@@ -963,6 +1001,7 @@ var RichClayBundle = (() => {
     activate() {
       if (this.active) return;
       this.active = true;
+      ensureStyles(this.element.ownerDocument);
       consumeInertContenteditable(this.element);
       const initialHTML = this.element.innerHTML;
       const Squire = this.options.Squire || this.window.Squire || globalThis.Squire;
@@ -1378,7 +1417,348 @@ var RichClayBundle = (() => {
     }
   }
 
+  // richclay.css
+  var richclay_default = `:root {
+  --richclay-surface: #ffffff;
+  --richclay-surface-alt: #f6f7f9;
+  --richclay-text: #0b0e14;
+  --richclay-muted: #667085;
+  --richclay-border: #c9ced8;
+  --richclay-accent: #0f766e;
+  --richclay-accent-ink: #ffffff;
+  --richclay-focus: #2563eb;
+  --richclay-danger: #b42318;
+  --richclay-radius: 6px;
+  --richclay-control-size: 34px;
+  --richclay-shadow: 0 10px 24px rgb(15 23 42 / 0.16);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --richclay-surface: #16181d;
+    --richclay-surface-alt: #22252c;
+    --richclay-text: #ffffff;
+    --richclay-muted: #a3aab8;
+    --richclay-border: #4a5260;
+    --richclay-accent: #2dd4bf;
+    --richclay-accent-ink: #05201d;
+    --richclay-focus: #93c5fd;
+    --richclay-shadow: 0 12px 28px rgb(0 0 0 / 0.35);
+  }
+}
+
+.richclay-toolbar {
+  align-items: center;
+  background: var(--richclay-surface-alt);
+  border: 1px solid var(--richclay-border);
+  border-radius: var(--richclay-radius);
+  color: var(--richclay-text);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-block: 0 6px;
+  padding: 4px;
+}
+
+/* Seamless card: in the default layout the toolbar sits directly above the
+   editor. Fuse them into a single bordered card with one divider \u2014 the
+   toolbar's bottom border \u2014 instead of two stacked, separated boxes. */
+.richclay-toolbar:has(+ .richclay-editor) {
+  margin-block-end: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.richclay-toolbar + .richclay-editor {
+  border-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+/* In a fused card, draw the focus ring inside the body so it never crosses
+   the toolbar divider. */
+.richclay-toolbar + .richclay-editor:focus-visible {
+  outline-offset: -3px;
+}
+
+.richclay-button {
+  align-items: center;
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: currentColor;
+  display: inline-flex;
+  height: var(--richclay-control-size);
+  justify-content: center;
+  margin: 0;
+  min-width: var(--richclay-control-size);
+  padding: 0;
+  position: relative;
+}
+
+.richclay-button:hover,
+.richclay-button[aria-expanded="true"],
+.richclay-menu-item:hover {
+  background: var(--richclay-surface);
+  border-color: var(--richclay-border);
+}
+
+.richclay-button.is-active,
+.richclay-button[aria-pressed="true"],
+.richclay-menu-item.is-active {
+  background: rgb(0 0 0 / 0.13);
+  border-color: rgb(0 0 0 / 0.22);
+  color: var(--richclay-text);
+  box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.26);
+}
+
+.richclay-button:focus-visible,
+.richclay-menu-item:focus-visible,
+.richclay-editor:focus-visible,
+.richclay-input:focus-visible,
+.richclay-primary:focus-visible,
+.richclay-secondary:focus-visible {
+  outline: 3px solid var(--richclay-focus);
+  outline-offset: 2px;
+}
+
+.richclay-button:disabled {
+  color: var(--richclay-muted);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* Remove-link icon: the standard link glyph with a diagonal cut painted in the
+   button's own background colour, so the chain reads as severed in every state.
+   The cut tracks the background the button shows: the toolbar surface at rest,
+   the raised surface on hover. */
+.richclay-cut {
+  stroke: var(--richclay-surface-alt);
+}
+
+.richclay-button:hover .richclay-cut,
+.richclay-button[aria-expanded="true"] .richclay-cut {
+  stroke: var(--richclay-surface);
+}
+
+.richclay-separator {
+  align-self: stretch;
+  background: var(--richclay-border);
+  display: inline-block;
+  margin: 5px 4px;
+  width: 1px;
+}
+
+.richclay-menu-wrap {
+  display: inline-flex;
+  position: relative;
+}
+
+.richclay-menu {
+  background: var(--richclay-surface);
+  border: 1px solid var(--richclay-border);
+  border-radius: var(--richclay-radius);
+  box-shadow: var(--richclay-shadow);
+  color: var(--richclay-text);
+  display: grid;
+  gap: 2px;
+  inset-block-start: calc(100% + 4px);
+  inset-inline-start: 0;
+  min-width: 160px;
+  padding: 4px;
+  position: absolute;
+  z-index: 1000;
+}
+
+.richclay-menu[hidden] {
+  display: none;
+}
+
+.richclay-menu-item {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: inherit;
+  font: inherit;
+  min-height: 32px;
+  padding: 5px 9px;
+  text-align: start;
+}
+
+.richclay-editor {
+  background: var(--richclay-surface);
+  border: 1px solid var(--richclay-border);
+  border-radius: var(--richclay-radius);
+  color: var(--richclay-text);
+  min-height: 9rem;
+  /* Break a long unbreakable string (e.g. a bare URL) in prose rather than let
+     it widen the editor. \`anywhere\` also lowers min-content, so the editor can't
+     grow even as a flex/grid item. Inert on the code <pre> (white-space: pre). */
+  overflow-wrap: anywhere;
+  padding: 12px;
+  position: relative;
+}
+
+.richclay-editor.richclay-empty::before {
+  color: var(--richclay-muted);
+  content: attr(data-richclay-placeholder);
+  inset-block-start: 12px;
+  inset-inline-start: 12px;
+  pointer-events: none;
+  position: absolute;
+}
+
+.richclay-editor p,
+.richclay-editor h1,
+.richclay-editor h2,
+.richclay-editor h3,
+.richclay-editor h4,
+.richclay-editor h5,
+.richclay-editor h6,
+.richclay-editor blockquote,
+.richclay-editor pre,
+.richclay-editor ul,
+.richclay-editor ol {
+  margin-block: 0 0.75em;
+}
+
+.richclay-editor > :last-child {
+  margin-block-end: 0;
+}
+
+.richclay-editor blockquote {
+  border-inline-start: 3px solid var(--richclay-border);
+  color: var(--richclay-muted);
+  margin-inline: 0;
+  padding-inline-start: 12px;
+}
+
+/* Code blocks scroll horizontally inside the editor instead of widening it.
+   \`width: 0; min-width: 100%\` zeroes the pre's intrinsic-width contribution so a
+   long unbreakable line can't push an intrinsically-sized ancestor (flex/grid
+   item, inline-block, table cell) wider, while still filling the editor and
+   scrolling its own overflow. box-sizing keeps padding inside that 100%. */
+.richclay-editor pre {
+  background: var(--richclay-surface-alt);
+  border-radius: 4px;
+  box-sizing: border-box;
+  min-width: 100%;
+  overflow: auto;
+  padding: 10px;
+  width: 0;
+}
+
+.richclay-dialog {
+  background: var(--richclay-surface);
+  border: 1px solid var(--richclay-border);
+  border-radius: var(--richclay-radius);
+  box-shadow: var(--richclay-shadow);
+  color: var(--richclay-text);
+  display: grid;
+  gap: 10px;
+  margin-block: 6px;
+  max-width: 420px;
+  padding: 12px;
+}
+
+.richclay-dialog-title {
+  font-weight: 650;
+}
+
+.richclay-field {
+  display: grid;
+  gap: 4px;
+}
+
+.richclay-field span {
+  color: var(--richclay-muted);
+  font-size: 0.875rem;
+}
+
+.richclay-input {
+  background: var(--richclay-surface);
+  border: 1px solid var(--richclay-border);
+  border-radius: 4px;
+  color: var(--richclay-text);
+  font: inherit;
+  min-height: 36px;
+  padding: 6px 8px;
+}
+
+.richclay-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.richclay-primary,
+.richclay-secondary {
+  appearance: none;
+  border: 1px solid var(--richclay-border);
+  border-radius: 4px;
+  font: inherit;
+  min-height: 34px;
+  padding: 5px 10px;
+}
+
+.richclay-primary {
+  background: var(--richclay-accent);
+  border-color: var(--richclay-accent);
+  color: var(--richclay-accent-ink);
+}
+
+.richclay-secondary {
+  background: var(--richclay-surface-alt);
+  color: var(--richclay-text);
+}
+
+.richclay-sr-only {
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+@media (forced-colors: active) {
+  .richclay-toolbar,
+  .richclay-editor,
+  .richclay-menu,
+  .richclay-dialog,
+  .richclay-input {
+    border-color: CanvasText;
+  }
+
+  .richclay-button.is-active,
+  .richclay-button[aria-pressed="true"],
+  .richclay-menu-item.is-active,
+  .richclay-primary {
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  .richclay-button:focus-visible,
+  .richclay-menu-item:focus-visible,
+  .richclay-editor:focus-visible,
+  .richclay-input:focus-visible {
+    outline-color: Highlight;
+  }
+
+  .richclay-cut {
+    stroke: Canvas;
+  }
+}
+`;
+
   // src/browser-global.js
+  setRichClayStyles(richclay_default);
   var browser_global_default = RichClay;
   return __toCommonJS(browser_global_exports);
 })();

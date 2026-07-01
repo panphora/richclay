@@ -43,8 +43,8 @@
     "access": "public"
   },
   "scripts": {
-    "build:global": "esbuild src/browser-global.js --bundle --format=iife --global-name=RichClayBundle --outfile=richclay.js --banner:js='/* richclay global build. Source lives in src/. Run npm run build to regenerate. */' --footer:js='window.RichClay = RichClayBundle.default;'",
-    "build:vendor": "esbuild src/vendor-bundle.js --bundle --minify --format=iife --global-name=richclay --outfile=dist/richclay.min.js --banner:js='/* richclay self-contained vendor build (bundles Squire + DOMPurify) for hyperclayjs. Generated; do not edit. */'",
+    "build:global": "esbuild src/browser-global.js --bundle --loader:.css=text --format=iife --global-name=RichClayBundle --outfile=richclay.js --banner:js='/* richclay global build. Source lives in src/. Run npm run build to regenerate. */' --footer:js='window.RichClay = RichClayBundle.default;'",
+    "build:vendor": "esbuild src/vendor-bundle.js --bundle --minify --loader:.css=text --format=iife --global-name=richclay --outfile=dist/richclay.min.js --banner:js='/* richclay self-contained vendor build (bundles Squire + DOMPurify) for hyperclayjs. Generated; do not edit. */'",
     "build": "npm run build:global && npm run build:vendor",
     "copy-to-hyperclayjs": "npm run build && node scripts/copy-to-hyperclayjs.js",
     "prepublishOnly": "npm run build:global",

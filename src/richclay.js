@@ -13,11 +13,13 @@ import {
   RICHCLAY_SELECTOR,
   consumeInertContenteditable,
   installHyperclayBridge,
+  isHyperclayEditMode,
   markChrome,
   shouldActivateEditor,
   shouldUseHyperclay,
   stripRichClayFromClone
 } from "./hyperclay.js";
+import { ensureStyles } from "./styles.js";
 import {
   announce,
   cloneRange,
@@ -30,6 +32,7 @@ import {
 
 const instances = new WeakMap();
 const liveInstances = new Set();
+const autoInitWindows = new WeakSet();
 const globalRegistry = createDefaultRegistry();
 const KEEP_FOCUS = Symbol("richclay-keep-focus");
 let dialogSeq = 0;
@@ -98,6 +101,21 @@ export default class RichClay {
     return elements.map(element => new RichClay(element, options));
   }
 
+  static autoInit(win = typeof window !== "undefined" ? window : undefined) {
+    if (!win || !win.document || autoInitWindows.has(win)) return;
+    autoInitWindows.add(win);
+    const run = () => {
+      if (shouldUseHyperclay({}, win) && isHyperclayEditMode(win)) {
+        RichClay.init();
+      }
+    };
+    if (win.document.readyState === "loading") {
+      win.document.addEventListener("DOMContentLoaded", run, { once: true });
+    } else {
+      run();
+    }
+  }
+
   static registerButton(def) {
     validateButton(def);
     globalRegistry.set(def.id, def);
@@ -130,6 +148,7 @@ export default class RichClay {
     if (this.active) return;
 
     this.active = true;
+    ensureStyles(this.element.ownerDocument);
     consumeInertContenteditable(this.element);
 
     const initialHTML = this.element.innerHTML;
