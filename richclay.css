@@ -208,6 +208,78 @@
   margin-block-end: 0;
 }
 
+/* Inline editors ([editable]) inherit the page's own styling. richclay adds
+   only a caret, a discoverability outline, and empty-state affordances. */
+.richclay-inline {
+  caret-color: currentColor;
+}
+
+.richclay-inline:hover {
+  outline: 1px dashed var(--richclay-border);
+  outline-offset: 2px;
+}
+
+.richclay-inline.richclay-focused,
+.richclay-inline:focus-visible {
+  outline: 2px dashed var(--richclay-focus);
+  outline-offset: 2px;
+}
+
+.richclay-inline.richclay-empty {
+  min-height: 1em;
+  min-width: 1ch;
+}
+
+.richclay-inline.richclay-empty::before {
+  color: var(--richclay-muted);
+  content: attr(data-richclay-placeholder);
+  pointer-events: none;
+}
+
+/* Floating toolbar shell for inline editors. Fixed-position and body-mounted:
+   fixed elements never create scrollbars, and body mounting avoids transformed
+   ancestors silently turning fixed into ancestor-relative. */
+.richclay-float {
+  left: 0;
+  position: fixed;
+  top: 0;
+  will-change: transform;
+  z-index: 99999;
+}
+
+.richclay-float .richclay-toolbar {
+  box-shadow: var(--richclay-shadow);
+  margin-block: 0;
+}
+
+.richclay-float .richclay-dialog {
+  margin-block: 6px 0;
+}
+
+/* Compact vertical rail for narrow margins. */
+.richclay-float-rail .richclay-toolbar {
+  --richclay-control-size: 28px;
+  flex-direction: column;
+  flex-wrap: nowrap;
+}
+
+.richclay-float-rail .richclay-toolbar svg {
+  height: 15px;
+  width: 15px;
+}
+
+.richclay-float-rail .richclay-separator {
+  align-self: stretch;
+  height: 1px;
+  margin: 4px 5px;
+  width: auto;
+}
+
+.richclay-float-rail .richclay-menu {
+  inset-block-start: 0;
+  inset-inline-start: calc(100% + 4px);
+}
+
 .richclay-editor blockquote {
   border-inline-start: 3px solid var(--richclay-border);
   color: var(--richclay-muted);

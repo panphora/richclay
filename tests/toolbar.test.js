@@ -150,3 +150,25 @@ test("button aria-label exposes the keyboard shortcut", () => {
   assert.match(bold.getAttribute("aria-label"), /^Bold \((Ctrl|Cmd)\+B\)$/);
   assert.equal(bold.title, bold.getAttribute("aria-label"));
 });
+
+test("toolbar:false renders no toolbar and keeps shortcuts active", () => {
+  setupDom('<!doctype html><html><body><div data-richclay><p>x</p></div></body></html>');
+  const editor = new RichClay(document.querySelector("[data-richclay]"), { Squire: FakeSquire, toolbar: false });
+  assert.equal(editor.active, true);
+  assert.equal(document.querySelector("[data-richclay-toolbar]"), null);
+  const shortcuts = editor.squire.commands.filter(c => Array.isArray(c) && c[0] === "shortcut");
+  assert.equal(shortcuts.length > 0, true);
+});
+
+test("an inline custom toolbar definition's shortcut is installed", () => {
+  setupDom('<!doctype html><html><body><div data-richclay><p>x</p></div></body></html>');
+  const editor = new RichClay(document.querySelector("[data-richclay]"), {
+    Squire: FakeSquire,
+    toolbar: ["bold", { id: "zap", label: "Zap", shortcut: "Mod+E", run: () => {} }]
+  });
+  const keys = editor.squire.commands
+    .filter(c => Array.isArray(c) && c[0] === "shortcut")
+    .map(c => c[1]);
+  assert.equal(keys.includes("Ctrl-e"), true);
+  assert.equal(keys.includes("Meta-e"), true);
+});

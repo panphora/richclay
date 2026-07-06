@@ -29,7 +29,7 @@ The saved region keeps:
 - semantic content HTML,
 - `data-richclay` or `richclay`,
 - author-provided attributes that were not marked as richclay runtime state,
-- `inert-contenteditable` when the live editor had `contenteditable`.
+- `inert-contenteditable` only when the author provided `contenteditable`. richclay-added `contenteditable` is removed outright, and a legacy saved `inert-contenteditable="true"` self-heals: consumption marks it runtime, so the next save drops it.
 
 The saved region loses:
 
@@ -44,6 +44,16 @@ The saved region loses:
 ## Undo Interop
 
 Squire owns the editor undo stack. While active, richclay adds a runtime `no-undo` marker so Hyperclay's optional page-level undo can defer to Squire for that region. The marker is removed during save if richclay added it. An author-provided `no-undo` is preserved.
+
+## Inline Mode (`editable`)
+
+- `editable` value tokens parse in `parseEditableOptions` (src/hyperclay.js). The constructor derives options from the attribute; explicit constructor options win over tokens.
+- Fidelity-first attach: Squire's constructor wipes the root with `setHTML("")`, so inline activation restores the captured `innerHTML` by direct assignment instead of `setHTML()`. That skips the sanitize pass and block re-wrapping that would rewrite author markup on mere activation. Consequence to verify in real browsers: Squire records its first undo state lazily on the first edit, so undo-to-initial must restore the original content, not the empty constructor state.
+- Single-line is imposed at the edges, since Squire has no single-line mode: `setKeyHandler` no-ops for Enter and Shift-Enter, a capture-phase document `beforeinput` listener cancels `insertParagraph`/`insertLineBreak` (IME and mobile paths that bypass keydown), the sanitize hook flattens pasted blocks, and the save strip unwraps a lone bare `<P>` as a safety net.
+- The floating toolbar is focus-scoped: created on editor focus, destroyed on blur, with a focus-target check so moving into the toolbar or link dialog keeps it alive. At most one floating toolbar exists at a time, and idle pages carry no toolbar DOM.
+- Placement is a pure function (`placeToolbar` in src/toolbar-float.js): above with a 16px gap, then below, then a side rail (gap ladder 16/8/0, wider margin first, following the viewport within the element's visible span), then pinned to the viewport top; hidden when the element leaves the viewport entirely. `PLACEMENT_SLACK` gives the current mode 4px of hysteresis against flip-flapping. The shell is `position: fixed` and body-mounted: fixed elements cannot create scrollbars, and body mounting dodges transformed ancestors that would silently re-anchor `fixed`.
+- Inline ingress sanitize extends the card allowlist with `class`, `id`, `data-*`, and `img[src alt width height]` (`inlineSanitizeConfig` in src/sanitize.js); scripts, `on*` handlers, and `javascript:` URLs stay stripped.
+- Known limitation: placement math uses the layout viewport (getBoundingClientRect and position: fixed coordinate space). Under pinch-zoom, `visualViewport.offsetTop/offsetLeft` are not compensated, so the toolbar can sit outside the visible region until zoom resets. Revisit if mobile editing becomes a priority.
 
 ## Sanitization Boundaries
 

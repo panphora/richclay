@@ -50,6 +50,18 @@ var RichClayBundle = (() => {
   };
   var presets = {
     minimal: ["bold", "italic", "link", "unorderedList"],
+    inline: [
+      "bold",
+      "italic",
+      "underline",
+      "strikethrough",
+      "code",
+      "link",
+      "unlink",
+      "undo",
+      "redo",
+      "clearFormatting"
+    ],
     standard: [
       "blockMenu",
       "bold",
@@ -254,10 +266,11 @@ var RichClayBundle = (() => {
   }
 
   // src/hyperclay.js
-  var RICHCLAY_SELECTOR = "[data-richclay], [richclay]";
-  var CHROME_SELECTOR = "[data-richclay-toolbar], [data-richclay-menu], [data-richclay-dialog], [data-richclay-live]";
+  var RICHCLAY_SELECTOR = "[data-richclay], [richclay], [editable]";
+  var CHROME_SELECTOR = "[data-richclay-toolbar], [data-richclay-menu], [data-richclay-dialog], [data-richclay-live], [data-richclay-float]";
   var runtimeClasses = [
     "richclay-editor",
+    "richclay-inline",
     "richclay-active",
     "richclay-empty",
     "richclay-focused"
@@ -284,6 +297,19 @@ var RichClayBundle = (() => {
     if (!shouldUseHyperclay(options, win)) return true;
     return isHyperclayEditMode(win);
   }
+  function parseEditableOptions(element) {
+    if (!element.hasAttribute("editable")) return null;
+    const tokens = new Set(
+      (element.getAttribute("editable") || "").trim().split(/\s+/).filter(Boolean)
+    );
+    const options = {
+      inline: true,
+      singleLine: tokens.has("single-line"),
+      toolbarOnSelect: tokens.has("toolbar-on-select")
+    };
+    if (tokens.has("no-toolbar")) options.toolbar = false;
+    return options;
+  }
   function installHyperclayBridge(win = window) {
     if (installedWindows.has(win)) return;
     const beforeSave = win.hyperclay?.beforeSave;
@@ -294,30 +320,45 @@ var RichClayBundle = (() => {
   function stripRichClayFromClone(docElem) {
     docElem.querySelectorAll?.(CHROME_SELECTOR).forEach((node) => node.remove());
     docElem.querySelectorAll?.(RICHCLAY_SELECTOR).forEach((region) => {
-      if (region.hasAttribute("contenteditable")) {
-        const originalValue = region.getAttribute("contenteditable");
-        region.setAttribute("inert-contenteditable", originalValue);
-        region.removeAttribute("contenteditable");
-      }
-      runtimeClasses.forEach((className) => region.classList.remove(className));
-      if (region.getAttribute("class") === "") region.removeAttribute("class");
-      removeRuntimeAttribute(region, "role", "data-richclay-runtime-role");
-      removeRuntimeAttribute(region, "aria-multiline", "data-richclay-runtime-aria-multiline");
-      removeRuntimeAttribute(region, "no-undo", "data-richclay-runtime-no-undo");
-      removeRuntimeDescribedBy(region);
-      region.removeAttribute("data-richclay-active");
-      region.removeAttribute("data-richclay-placeholder");
-      region.removeAttribute("data-richclay-runtime-role");
-      region.removeAttribute("data-richclay-runtime-aria-multiline");
-      region.removeAttribute("data-richclay-runtime-no-undo");
-      region.removeAttribute("data-richclay-runtime-describedby");
-      region.removeAttribute("data-richclay-runtime-contenteditable");
+      removeRuntimeState(region, "save");
+      if (region.matches?.('[editable~="single-line"]')) unwrapLoneSingleLineBlock(region);
       region.querySelectorAll("#squire-selection-start, #squire-selection-end").forEach((node) => {
         node.remove();
       });
       region.querySelectorAll(".squire-image-resize-container").forEach((node) => node.remove());
       stripZeroWidthArtifacts(region);
     });
+  }
+  function removeRuntimeState(region, mode) {
+    const origin = region.getAttribute("data-richclay-runtime-contenteditable");
+    if (region.hasAttribute("contenteditable")) {
+      if (origin === "true") {
+        region.removeAttribute("contenteditable");
+      } else if (origin) {
+        if (mode === "destroy") {
+          region.setAttribute("contenteditable", origin);
+        } else {
+          region.setAttribute("inert-contenteditable", origin);
+          region.removeAttribute("contenteditable");
+        }
+      } else if (mode === "save") {
+        region.setAttribute("inert-contenteditable", region.getAttribute("contenteditable"));
+        region.removeAttribute("contenteditable");
+      }
+    }
+    runtimeClasses.forEach((className) => region.classList.remove(className));
+    if (region.getAttribute("class") === "") region.removeAttribute("class");
+    removeRuntimeAttribute(region, "role", "data-richclay-runtime-role");
+    removeRuntimeAttribute(region, "aria-multiline", "data-richclay-runtime-aria-multiline");
+    removeRuntimeAttribute(region, "no-undo", "data-richclay-runtime-no-undo");
+    removeRuntimeDescribedBy(region);
+    region.removeAttribute("data-richclay-active");
+    region.removeAttribute("data-richclay-placeholder");
+    region.removeAttribute("data-richclay-runtime-role");
+    region.removeAttribute("data-richclay-runtime-aria-multiline");
+    region.removeAttribute("data-richclay-runtime-no-undo");
+    region.removeAttribute("data-richclay-runtime-describedby");
+    region.removeAttribute("data-richclay-runtime-contenteditable");
   }
   function stripZeroWidthArtifacts(region) {
     const zwsp = String.fromCharCode(8203);
@@ -335,8 +376,20 @@ var RichClayBundle = (() => {
       });
     }
     region.querySelectorAll("b, i, u, s, em, strong, code, sub, sup, span").forEach((el) => {
-      if (el.children.length === 0 && (el.textContent || "") === "") el.remove();
+      if (el.children.length === 0 && (el.textContent || "") === "" && el.attributes.length === 0) {
+        el.remove();
+      }
     });
+  }
+  function unwrapLoneSingleLineBlock(region) {
+    const meaningful = Array.from(region.childNodes).filter(
+      (node) => node.nodeType !== 3 || (node.nodeValue || "").trim() !== ""
+    );
+    if (meaningful.length !== 1) return;
+    const block = meaningful[0];
+    if (block.nodeType !== 1 || block.nodeName !== "P" || block.attributes.length > 0) return;
+    while (block.firstChild) region.insertBefore(block.firstChild, block);
+    block.remove();
   }
   function consumeInertContenteditable(element) {
     if (!element.hasAttribute("inert-contenteditable")) return null;
@@ -344,6 +397,9 @@ var RichClayBundle = (() => {
     if (!["false", "plaintext-only"].includes(value)) value = "true";
     element.setAttribute("contenteditable", value);
     element.removeAttribute("inert-contenteditable");
+    if (value === "true") {
+      element.setAttribute("data-richclay-runtime-contenteditable", "true");
+    }
     return value;
   }
   function markChrome(element) {
@@ -633,8 +689,10 @@ var RichClayBundle = (() => {
         this.openMenu(current.def.id, "first");
       }
       if (key === "Escape") {
+        const hadOpenMenu = Array.from(this.menus.values()).some((entry) => !entry.menu.hidden);
         this.closeMenus();
-        current.button.focus();
+        if (hadOpenMenu) current.button.focus();
+        else this.editor.focus();
       }
     }
     handleMenuKeydown(event, def, trigger) {
@@ -759,6 +817,141 @@ var RichClayBundle = (() => {
     return container;
   }
 
+  // src/toolbar-float.js
+  var GAP = 16;
+  var GAP_LADDER = [16, 8, 0];
+  var VIEWPORT_INSET = 8;
+  var PLACEMENT_SLACK = 4;
+  function placeToolbar({ anchor, bar, rail, viewport, current = null }) {
+    const slack = (mode) => current === mode ? PLACEMENT_SLACK : 0;
+    if (anchor.bottom <= 0 || anchor.top >= viewport.height || anchor.right <= 0 || anchor.left >= viewport.width) {
+      return { mode: "hidden", x: 0, y: 0 };
+    }
+    const clampX = (width) => Math.max(VIEWPORT_INSET, Math.min(anchor.left, viewport.width - width - VIEWPORT_INSET));
+    const aboveY = anchor.top - GAP - bar.height;
+    if (aboveY >= VIEWPORT_INSET - slack("above")) {
+      return { mode: "above", x: clampX(bar.width), y: aboveY };
+    }
+    const belowY = anchor.bottom + GAP;
+    if (belowY + bar.height <= viewport.height - VIEWPORT_INSET + slack("below")) {
+      return { mode: "below", x: clampX(bar.width), y: belowY };
+    }
+    const rightSpace = viewport.width - anchor.right - VIEWPORT_INSET;
+    const leftSpace = anchor.left - VIEWPORT_INSET;
+    const sides = rightSpace >= leftSpace ? [["rail-right", rightSpace], ["rail-left", leftSpace]] : [["rail-left", leftSpace], ["rail-right", rightSpace]];
+    for (const [mode, space] of sides) {
+      for (const gap of GAP_LADDER) {
+        if (rail.width + gap > space + slack(mode)) continue;
+        const x = mode === "rail-right" ? Math.min(anchor.right + gap, viewport.width - rail.width - VIEWPORT_INSET) : Math.max(anchor.left - gap - rail.width, VIEWPORT_INSET);
+        const maxY = Math.min(anchor.bottom, viewport.height - VIEWPORT_INSET) - rail.height;
+        const y = Math.max(VIEWPORT_INSET, Math.min(Math.max(anchor.top, VIEWPORT_INSET), maxY));
+        return { mode, x, y, gap };
+      }
+    }
+    return { mode: "pinned", x: clampX(bar.width), y: VIEWPORT_INSET };
+  }
+  var FloatingToolbar = class {
+    constructor(editor, controls) {
+      this.editor = editor;
+      this.mode = null;
+      this.hidden = false;
+      this.frame = 0;
+      this.bar = { width: 0, height: 0 };
+      this.rail = { width: 0, height: 0 };
+      const doc = editor.element.ownerDocument;
+      this.doc = doc;
+      this.win = doc.defaultView || globalThis;
+      this.root = doc.createElement("div");
+      this.root.className = "richclay-float";
+      this.root.setAttribute("data-richclay-float", "");
+      this.root.setAttribute("save-remove", "");
+      markChrome(this.root);
+      doc.body.appendChild(this.root);
+      this.toolbar = new Toolbar(editor, controls, { toolbarContainer: this.root });
+      this.onScroll = () => this.schedule();
+      this.onResize = () => {
+        this.measure();
+        this.schedule();
+      };
+      doc.addEventListener("scroll", this.onScroll, { capture: true, passive: true });
+      this.win.addEventListener("resize", this.onResize, { passive: true });
+      this.win.visualViewport?.addEventListener("resize", this.onResize, { passive: true });
+      this.win.visualViewport?.addEventListener("scroll", this.onScroll, { passive: true });
+      this.resizeObserver = typeof this.win.ResizeObserver === "function" ? new this.win.ResizeObserver(() => this.schedule()) : null;
+      this.resizeObserver?.observe(editor.element);
+      this.measure();
+      this.reposition();
+    }
+    // Measure both orientations up front so the placement math can evaluate the
+    // rail without first switching to it.
+    measure() {
+      const wasRail = this.root.classList.contains("richclay-float-rail");
+      this.root.style.visibility = "hidden";
+      this.root.classList.remove("richclay-float-rail");
+      this.bar = { width: this.root.offsetWidth || 0, height: this.root.offsetHeight || 0 };
+      this.root.classList.add("richclay-float-rail");
+      this.rail = { width: this.root.offsetWidth || 0, height: this.root.offsetHeight || 0 };
+      this.root.classList.toggle("richclay-float-rail", wasRail);
+      this.root.style.visibility = "";
+    }
+    schedule() {
+      if (!this.win.requestAnimationFrame) {
+        this.reposition();
+        return;
+      }
+      if (this.frame) return;
+      this.frame = this.win.requestAnimationFrame(() => {
+        this.frame = 0;
+        this.reposition();
+      });
+    }
+    setVisible(visible) {
+      this.hidden = !visible;
+      this.reposition();
+    }
+    reposition() {
+      if (this.hidden) {
+        this.root.style.display = "none";
+        return;
+      }
+      const anchor = this.editor.element.getBoundingClientRect();
+      const viewport = {
+        width: this.win.visualViewport?.width ?? this.win.innerWidth,
+        height: this.win.visualViewport?.height ?? this.win.innerHeight
+      };
+      const placement = placeToolbar({
+        anchor,
+        bar: this.bar,
+        rail: this.rail,
+        viewport,
+        current: this.mode
+      });
+      this.mode = placement.mode;
+      if (placement.mode === "hidden") {
+        this.root.style.display = "none";
+        return;
+      }
+      this.root.style.display = "";
+      this.root.classList.toggle(
+        "richclay-float-rail",
+        placement.mode === "rail-left" || placement.mode === "rail-right"
+      );
+      this.root.classList.toggle("richclay-float-pinned", placement.mode === "pinned");
+      this.root.style.transform = `translate(${Math.round(placement.x)}px, ${Math.round(placement.y)}px)`;
+    }
+    destroy() {
+      if (this.frame) this.win.cancelAnimationFrame?.(this.frame);
+      this.frame = 0;
+      this.doc.removeEventListener("scroll", this.onScroll, { capture: true });
+      this.win.removeEventListener("resize", this.onResize);
+      this.win.visualViewport?.removeEventListener("resize", this.onResize);
+      this.win.visualViewport?.removeEventListener("scroll", this.onScroll);
+      this.resizeObserver?.disconnect();
+      this.toolbar.destroy();
+      this.root.remove();
+    }
+  };
+
   // src/sanitize.js
   var DEFAULT_SANITIZE_CONFIG = {
     ALLOWED_TAGS: [
@@ -877,6 +1070,51 @@ var RichClayBundle = (() => {
       }
     });
   }
+  var INLINE_SANITIZE_EXTENSIONS = {
+    ADD_TAGS: ["img"],
+    ADD_ATTR: ["class", "id", "src", "alt", "width", "height"]
+  };
+  function inlineSanitizeConfig(config = {}) {
+    return {
+      ...config,
+      ADD_TAGS: [.../* @__PURE__ */ new Set([...INLINE_SANITIZE_EXTENSIONS.ADD_TAGS, ...config.ADD_TAGS || []])],
+      ADD_ATTR: [.../* @__PURE__ */ new Set([...INLINE_SANITIZE_EXTENSIONS.ADD_ATTR, ...config.ADD_ATTR || []])],
+      ALLOW_DATA_ATTR: config.ALLOW_DATA_ATTR ?? true
+    };
+  }
+  var FLATTEN_SELECTOR = "p, div, h1, h2, h3, h4, h5, h6, blockquote, pre, ul, ol, li, figure, figcaption, table, thead, tbody, tr, td, th";
+  function flattenFragmentToSingleLine(fragment) {
+    const doc = fragment.ownerDocument || document;
+    fragment.querySelectorAll?.("br").forEach((br) => br.replaceWith(doc.createTextNode(" ")));
+    let block = fragment.querySelector?.(FLATTEN_SELECTOR);
+    while (block) {
+      const parent = block.parentNode;
+      parent.insertBefore(doc.createTextNode(" "), block);
+      while (block.firstChild) parent.insertBefore(block.firstChild, block);
+      parent.insertBefore(doc.createTextNode(" "), block);
+      block.remove();
+      block = fragment.querySelector(FLATTEN_SELECTOR);
+    }
+    collapseFragmentWhitespace(fragment, doc);
+    return fragment;
+  }
+  function collapseFragmentWhitespace(fragment, doc) {
+    fragment.normalize?.();
+    const walker = doc.createTreeWalker(
+      fragment,
+      4
+      /* NodeFilter.SHOW_TEXT */
+    );
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach((node) => {
+      node.nodeValue = node.nodeValue.replace(/\s+/g, " ");
+    });
+    const first = fragment.firstChild;
+    if (first?.nodeType === 3) first.nodeValue = first.nodeValue.replace(/^\s+/, "");
+    const last = fragment.lastChild;
+    if (last?.nodeType === 3) last.nodeValue = last.nodeValue.replace(/\s+$/, "");
+  }
 
   // src/styles.js
   var STYLE_ID = "richclay-styles";
@@ -903,8 +1141,8 @@ var RichClayBundle = (() => {
 
   // src/richclay.js
   var instances = /* @__PURE__ */ new WeakMap();
-  var liveInstances = /* @__PURE__ */ new Set();
   var autoInitWindows = /* @__PURE__ */ new WeakSet();
+  var watchedWindows = /* @__PURE__ */ new WeakSet();
   var globalRegistry = createDefaultRegistry();
   var KEEP_FOCUS = Symbol("richclay-keep-focus");
   var dialogSeq = 0;
@@ -916,7 +1154,10 @@ var RichClayBundle = (() => {
     readOnly: false,
     hyperclay: "auto",
     onChange: null,
-    Squire: null
+    Squire: null,
+    inline: false,
+    singleLine: false,
+    toolbarOnSelect: false
   };
   var RichClay = class _RichClay {
     static presets = presets;
@@ -926,9 +1167,16 @@ var RichClayBundle = (() => {
       const existing = instances.get(element);
       if (existing) return existing;
       this.element = element;
-      this.options = { ...defaultOptions, ...options };
+      const derived = { ...parseEditableOptions(element), ...options };
+      this.options = { ...defaultOptions, ...derived };
+      if (this.options.singleLine && !("toolbar" in derived)) {
+        this.options.toolbar = "inline";
+      }
       this.registry = new Map(globalRegistry);
       this.toolbar = null;
+      this.float = null;
+      this._onToolbarKey = null;
+      this._onFloatFocusOut = null;
       this.liveRegion = null;
       this.description = null;
       this.dialog = null;
@@ -937,16 +1185,25 @@ var RichClayBundle = (() => {
       this.active = false;
       this._squire = null;
       this._squireListeners = [];
+      this._onBeforeInput = null;
       this._shortcutKeys = [];
-      this._onFocus = () => this.element.classList.add("richclay-focused");
-      this._onBlur = () => this.element.classList.remove("richclay-focused");
+      this._onFocus = () => {
+        this.element.classList.add("richclay-focused");
+        if (this.options.inline) this.ensureFloatingToolbar();
+      };
+      this._onBlur = (event) => {
+        this.element.classList.remove("richclay-focused");
+        if (this.options.inline) this.scheduleFloatTeardown(event);
+      };
       this.ensureMarker();
       this.hyperclay = shouldUseHyperclay(this.options, this.window);
       if (this.hyperclay) installHyperclayBridge(this.window);
       instances.set(element, this);
-      liveInstances.add(this);
-      this.sanitizer = createSanitizer(this.options.sanitize, this.element.ownerDocument);
-      sanitizeElement(this.element, this.options.sanitize);
+      this.sanitizeConfig = this.options.inline ? inlineSanitizeConfig(this.options.sanitize) : this.options.sanitize;
+      this.sanitizer = createSanitizer(this.sanitizeConfig, this.element.ownerDocument);
+      if (!this.options.inline) {
+        sanitizeElement(this.element, this.sanitizeConfig);
+      }
       if (shouldActivateEditor(this.options, this.window)) {
         this.activate();
       }
@@ -967,6 +1224,7 @@ var RichClayBundle = (() => {
       const run = () => {
         if (shouldUseHyperclay({}, win) && isHyperclayEditMode(win)) {
           _RichClay.init();
+          _RichClay.watch(win);
         }
       };
       if (win.document.readyState === "loading") {
@@ -974,6 +1232,43 @@ var RichClayBundle = (() => {
       } else {
         run();
       }
+    }
+    static watch(win = typeof window !== "undefined" ? window : void 0, options = {}) {
+      if (!win || !win.document || watchedWindows.has(win)) return;
+      watchedWindows.add(win);
+      const mount = (element) => {
+        if (!instances.has(element)) new _RichClay(element, options);
+      };
+      const unmount = (element) => instances.get(element)?.destroy();
+      const observer = new win.MutationObserver((records) => {
+        records.forEach((record) => {
+          if (record.type === "attributes") {
+            const target = record.target;
+            if (target.matches?.(RICHCLAY_SELECTOR)) mount(target);
+            else unmount(target);
+            return;
+          }
+          record.addedNodes.forEach((node) => {
+            if (node.nodeType !== 1) return;
+            if (node.matches?.(RICHCLAY_SELECTOR)) mount(node);
+            node.querySelectorAll?.(RICHCLAY_SELECTOR).forEach(mount);
+          });
+          record.removedNodes.forEach((node) => {
+            if (node.nodeType !== 1) return;
+            const teardown = (el) => {
+              if (!el.isConnected) instances.get(el)?.destroy();
+            };
+            if (node.matches?.(RICHCLAY_SELECTOR)) teardown(node);
+            node.querySelectorAll?.(RICHCLAY_SELECTOR).forEach(teardown);
+          });
+        });
+      });
+      observer.observe(win.document.documentElement || win.document, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["editable", "data-richclay", "richclay"]
+      });
     }
     static registerButton(def) {
       validateButton(def);
@@ -1012,14 +1307,33 @@ var RichClayBundle = (() => {
       this.liveRegion = createLiveRegion(this.element.ownerDocument);
       this._squire = new Squire(this.element, {
         blockTag: "P",
-        sanitizeToDOMFragment: (html, editor) => this.sanitizer.sanitizeToDOMFragment(html, editor),
+        sanitizeToDOMFragment: (html, editor) => {
+          const fragment = this.sanitizer.sanitizeToDOMFragment(html, editor);
+          return this.options.singleLine ? flattenFragmentToSingleLine(fragment) : fragment;
+        },
         didError: (error) => {
           console.error("RichClay/Squire error", error);
         }
       });
-      this._squire.setHTML(initialHTML);
+      if (this.options.inline) {
+        this.element.innerHTML = initialHTML;
+        this.resetSquireUndoBaseline();
+      } else {
+        this._squire.setHTML(initialHTML);
+      }
       this.bindSquire();
+      if (this.options.singleLine) this.installSingleLineGuards();
       this.installShortcuts();
+      if (this.options.inline) {
+        this._onToolbarKey = (event) => {
+          if (event.altKey && event.key === "F10") {
+            event.preventDefault();
+            this.ensureFloatingToolbar();
+            this.float?.toolbar.focusFirst();
+          }
+        };
+        this.element.addEventListener("keydown", this._onToolbarKey);
+      }
       this.renderToolbar();
       this.updatePlaceholder();
     }
@@ -1032,7 +1346,7 @@ var RichClayBundle = (() => {
       } else {
         this.element.innerHTML = sanitizeHTML(
           html,
-          this.options.sanitize,
+          this.sanitizeConfig,
           this.element.ownerDocument
         );
       }
@@ -1048,8 +1362,13 @@ var RichClayBundle = (() => {
     }
     destroy() {
       this.closeLinkDialog();
+      this.teardownFloatingToolbar();
       this.toolbar?.destroy();
       this.toolbar = null;
+      if (this._onToolbarKey) {
+        this.element.removeEventListener("keydown", this._onToolbarKey);
+        this._onToolbarKey = null;
+      }
       this.liveRegion?.remove();
       this.liveRegion = null;
       this.description?.remove();
@@ -1060,11 +1379,14 @@ var RichClayBundle = (() => {
       });
       this._squireListeners = [];
       this._shortcutKeys = [];
+      if (this._onBeforeInput) {
+        this.element.ownerDocument.removeEventListener("beforeinput", this._onBeforeInput, true);
+        this._onBeforeInput = null;
+      }
       this._squire?.destroy?.();
       this._squire = null;
       this.cleanupEditorAttributes();
       instances.delete(this.element);
-      liveInstances.delete(this);
     }
     saveSelection() {
       this.savedSelection = getSquireSelection(this._squire) || this.savedSelection;
@@ -1219,15 +1541,23 @@ var RichClayBundle = (() => {
       this.dialog = null;
     }
     ensureMarker() {
-      if (!this.element.hasAttribute("data-richclay") && !this.element.hasAttribute("richclay")) {
+      if (!this.element.hasAttribute("data-richclay") && !this.element.hasAttribute("richclay") && !this.element.hasAttribute("editable")) {
         this.element.setAttribute("data-richclay", "");
       }
     }
     setupEditorAttributes() {
-      this.element.classList.add("richclay-editor", "richclay-active");
+      this.element.classList.add(
+        this.options.inline ? "richclay-inline" : "richclay-editor",
+        "richclay-active"
+      );
       this.element.setAttribute("data-richclay-active", "true");
-      if (!this.element.hasAttribute("contenteditable")) {
-        this.element.setAttribute("data-richclay-runtime-contenteditable", "true");
+      if (!this.element.hasAttribute("data-richclay-runtime-contenteditable")) {
+        const original = this.element.getAttribute("contenteditable");
+        if (original === null) {
+          this.element.setAttribute("data-richclay-runtime-contenteditable", "true");
+        } else if (original !== "true" && original !== "") {
+          this.element.setAttribute("data-richclay-runtime-contenteditable", original);
+        }
       }
       this.element.setAttribute("contenteditable", "true");
       if (!this.element.hasAttribute("role")) {
@@ -1237,7 +1567,7 @@ var RichClayBundle = (() => {
         setRuntimeAttribute(
           this.element,
           "aria-multiline",
-          "true",
+          this.options.singleLine ? "false" : "true",
           "data-richclay-runtime-aria-multiline"
         );
       }
@@ -1259,36 +1589,7 @@ var RichClayBundle = (() => {
       this.element.addEventListener("blur", this._onBlur);
     }
     cleanupEditorAttributes() {
-      this.element.classList.remove(
-        "richclay-editor",
-        "richclay-active",
-        "richclay-empty",
-        "richclay-focused"
-      );
-      if (this.element.getAttribute("class") === "") this.element.removeAttribute("class");
-      this.element.removeAttribute("contenteditable");
-      this.element.removeAttribute("data-richclay-active");
-      this.element.removeAttribute("data-richclay-placeholder");
-      this.element.removeAttribute("data-richclay-runtime-contenteditable");
-      if (this.element.hasAttribute("data-richclay-runtime-role")) {
-        this.element.removeAttribute("role");
-        this.element.removeAttribute("data-richclay-runtime-role");
-      }
-      if (this.element.hasAttribute("data-richclay-runtime-aria-multiline")) {
-        this.element.removeAttribute("aria-multiline");
-        this.element.removeAttribute("data-richclay-runtime-aria-multiline");
-      }
-      if (this.element.hasAttribute("data-richclay-runtime-no-undo")) {
-        this.element.removeAttribute("no-undo");
-        this.element.removeAttribute("data-richclay-runtime-no-undo");
-      }
-      if (this.element.hasAttribute("data-richclay-runtime-describedby")) {
-        const id = this.element.getAttribute("data-richclay-runtime-describedby");
-        const ids = (this.element.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean).filter((value) => value !== id);
-        if (ids.length) this.element.setAttribute("aria-describedby", ids.join(" "));
-        else this.element.removeAttribute("aria-describedby");
-        this.element.removeAttribute("data-richclay-runtime-describedby");
-      }
+      removeRuntimeState(this.element, "destroy");
       this.element.removeEventListener("focus", this._onFocus);
       this.element.removeEventListener("blur", this._onBlur);
     }
@@ -1307,6 +1608,7 @@ var RichClayBundle = (() => {
       const selection = () => {
         this.saveSelection();
         this.toolbar?.update();
+        if (this.options.toolbarOnSelect) this.updateFloatVisibility();
       };
       const undoState = () => this.toolbar?.update();
       [
@@ -1322,13 +1624,63 @@ var RichClayBundle = (() => {
     }
     renderToolbar() {
       if (!this.active || this.options.readOnly) return;
+      if (this.options.inline) {
+        if (this.float) {
+          this.teardownFloatingToolbar();
+          this.ensureFloatingToolbar();
+        }
+        return;
+      }
       this.toolbar?.destroy();
+      this.toolbar = null;
       const controls = this.resolveToolbarControls(this.options.toolbar);
+      if (!controls.length) return;
       this.toolbar = new Toolbar(this, controls, {
         toolbarContainer: this.options.toolbarContainer
       });
     }
+    ensureFloatingToolbar() {
+      if (this.float || !this.active || this.options.readOnly) return;
+      const controls = this.resolveToolbarControls(this.options.toolbar);
+      if (!controls.length) return;
+      this.float = new FloatingToolbar(this, controls);
+      this._onFloatFocusOut = (event) => this.scheduleFloatTeardown(event);
+      this.float.root.addEventListener("focusout", this._onFloatFocusOut);
+      this.toolbar = this.float.toolbar;
+      this.toolbar.update();
+      if (this.options.toolbarOnSelect) this.updateFloatVisibility();
+    }
+    teardownFloatingToolbar() {
+      if (!this.float) return;
+      if (this._onFloatFocusOut) {
+        this.float.root.removeEventListener("focusout", this._onFloatFocusOut);
+        this._onFloatFocusOut = null;
+      }
+      this.float.destroy();
+      this.float = null;
+      this.toolbar = null;
+    }
+    scheduleFloatTeardown(event) {
+      const next = event?.relatedTarget;
+      if (next && this.ownsFocusTarget(next)) return;
+      const doc = this.element.ownerDocument;
+      const win = doc.defaultView || globalThis;
+      win.setTimeout(() => {
+        const active = doc.activeElement;
+        if (active && this.ownsFocusTarget(active)) return;
+        this.teardownFloatingToolbar();
+      }, 0);
+    }
+    ownsFocusTarget(node) {
+      return node === this.element || this.element.contains(node) || Boolean(this.float?.root.contains(node)) || Boolean(this.dialog?.contains(node));
+    }
+    updateFloatVisibility() {
+      if (!this.float) return;
+      const range = this.savedSelection;
+      this.float.setVisible(Boolean(range && !range.collapsed));
+    }
     resolveToolbarControls(toolbar) {
+      if (toolbar === false || toolbar === null || toolbar === "none") return [];
       const requested = Array.isArray(toolbar) ? toolbar : presets[toolbar] || presets.standard;
       return requested.map((item) => {
         if (typeof item === "string") {
@@ -1343,8 +1695,13 @@ var RichClayBundle = (() => {
     }
     installShortcuts() {
       const seen = /* @__PURE__ */ new Set();
-      this.resolveToolbarControls("standard").forEach((def) => {
-        if (def.type === "menu" || !def.shortcut || seen.has(def.id)) return;
+      const registryDefs = [...this.registry.values()].filter(
+        (def) => !this.options.singleLine || presets.inline.includes(def.id)
+      );
+      const defs = [...this.resolveToolbarControls(this.options.toolbar), ...registryDefs];
+      defs.forEach((def) => {
+        if (def.type === "menu" || def.type === "separator") return;
+        if (!def.shortcut || !def.id || seen.has(def.id)) return;
         seen.add(def.id);
         shortcutKeys(def.shortcut).forEach((key) => {
           this._squire.setKeyHandler(key, (squire, event) => {
@@ -1354,6 +1711,36 @@ var RichClayBundle = (() => {
           this._shortcutKeys.push(key);
         });
       });
+    }
+    installSingleLineGuards() {
+      ["Enter", "Shift-Enter"].forEach((key) => {
+        this._squire.setKeyHandler(key, (squire, event) => event.preventDefault());
+        this._shortcutKeys.push(key);
+      });
+      this._onBeforeInput = (event) => {
+        if (!this.element.contains(event.target)) return;
+        if (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak") {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      };
+      this.element.ownerDocument.addEventListener("beforeinput", this._onBeforeInput, true);
+    }
+    // The fidelity restore bypasses setHTML, so Squire's undo baseline is still
+    // the empty document its constructor recorded; the first undo could wipe the
+    // region. Rebase the stack on the restored content. This touches Squire
+    // internals (property names survive its esbuild minify) and no-ops for other
+    // engines, like the tests' FakeSquire.
+    resetSquireUndoBaseline() {
+      const squire = this._squire;
+      if (!squire || !Array.isArray(squire._undoStack) || typeof squire.saveUndoState !== "function") {
+        return;
+      }
+      squire._undoStack.length = 0;
+      squire._undoStackLength = 0;
+      squire._undoIndex = -1;
+      squire._isInUndoState = false;
+      squire.saveUndoState();
     }
     updatePlaceholder() {
       const text = (this.element.textContent || "").replace(/\u200B/g, "").trim();
@@ -1626,6 +2013,78 @@ var RichClayBundle = (() => {
 
 .richclay-editor > :last-child {
   margin-block-end: 0;
+}
+
+/* Inline editors ([editable]) inherit the page's own styling. richclay adds
+   only a caret, a discoverability outline, and empty-state affordances. */
+.richclay-inline {
+  caret-color: currentColor;
+}
+
+.richclay-inline:hover {
+  outline: 1px dashed var(--richclay-border);
+  outline-offset: 2px;
+}
+
+.richclay-inline.richclay-focused,
+.richclay-inline:focus-visible {
+  outline: 2px dashed var(--richclay-focus);
+  outline-offset: 2px;
+}
+
+.richclay-inline.richclay-empty {
+  min-height: 1em;
+  min-width: 1ch;
+}
+
+.richclay-inline.richclay-empty::before {
+  color: var(--richclay-muted);
+  content: attr(data-richclay-placeholder);
+  pointer-events: none;
+}
+
+/* Floating toolbar shell for inline editors. Fixed-position and body-mounted:
+   fixed elements never create scrollbars, and body mounting avoids transformed
+   ancestors silently turning fixed into ancestor-relative. */
+.richclay-float {
+  left: 0;
+  position: fixed;
+  top: 0;
+  will-change: transform;
+  z-index: 99999;
+}
+
+.richclay-float .richclay-toolbar {
+  box-shadow: var(--richclay-shadow);
+  margin-block: 0;
+}
+
+.richclay-float .richclay-dialog {
+  margin-block: 6px 0;
+}
+
+/* Compact vertical rail for narrow margins. */
+.richclay-float-rail .richclay-toolbar {
+  --richclay-control-size: 28px;
+  flex-direction: column;
+  flex-wrap: nowrap;
+}
+
+.richclay-float-rail .richclay-toolbar svg {
+  height: 15px;
+  width: 15px;
+}
+
+.richclay-float-rail .richclay-separator {
+  align-self: stretch;
+  height: 1px;
+  margin: 4px 5px;
+  width: auto;
+}
+
+.richclay-float-rail .richclay-menu {
+  inset-block-start: 0;
+  inset-inline-start: calc(100% + 4px);
 }
 
 .richclay-editor blockquote {

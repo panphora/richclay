@@ -61,17 +61,48 @@ In standalone pages, richclay activates by default. In Hyperclay mode, it activa
 - `?editmode=true` or `?editmode=false`
 - `window.__hyperclayEditMode`
 - `window.hyperclay.isEditMode`
-- `editmode=true` or `hyperclayEditMode=true` cookies
+- a non-empty `isAdminOfCurrentResource` cookie (Hyperclay's owner-session signal)
 
 When `window.hyperclay.beforeSave` exists, richclay registers one cleanup hook for the page. The hook runs on Hyperclay's cloned document before serialization and:
 
 - preserves the editor marker and semantic content HTML,
 - removes toolbar, menu, dialog, and live-region DOM,
-- changes `contenteditable` to `inert-contenteditable`,
+- removes richclay-added `contenteditable` outright; author-provided `contenteditable` becomes `inert-contenteditable`,
 - removes richclay runtime classes and runtime-only ARIA attributes,
 - removes generated `no-undo`, `snapshot-remove`, `no-watch`, and known Squire artifacts.
 
 On the next edit-mode load, `inert-contenteditable` is consumed back into `contenteditable` and Squire reattaches to the existing inner HTML. View-mode pages remain static and non-editable.
+
+## Inline Editing With `editable`
+
+Put an `editable` attribute on any element and it becomes a rich text editor in place while editing: same element, same page styles, no card chrome. The attribute value is a space-separated token list, like `class`:
+
+```html
+<h1 editable="single-line">Page title</h1>
+<div editable>
+  <p>Multi-line rich text, the default.</p>
+</div>
+<p editable="single-line no-toolbar">Caption</p>
+```
+
+| Token | Meaning |
+| --- | --- |
+| *(none)* | Multi-line rich text editor. |
+| `single-line` | Enter and Shift+Enter do nothing; pasted blocks are flattened to one line. |
+| `no-toolbar` | No toolbar UI. Keyboard shortcuts stay active. |
+| `toolbar-on-select` | The toolbar appears only while text is selected. |
+
+Unknown tokens are ignored. In Hyperclay pages, `editable` activates only in edit mode. In view mode and in the saved file it is an inert marker: the saved markup contains no `contenteditable` or other runtime state, just the author's content plus the attribute.
+
+Differences from card editors (`data-richclay`):
+
+- **Content fidelity.** Activation never rewrites the element's content: no sanitize pass, no block re-wrapping. Sanitization still guards paste and `setHTML()`, with an allowlist extended for real page markup (`class`, `id`, `data-*`, `img`).
+- **Floating toolbar.** Created when the editor gains focus, removed on blur. It floats 16px above the element; if that scrolls out of view it flips below; if both edges are off-screen it becomes a compact vertical rail in the wider page margin, shrinking its gap 16px to 8px to 0px to fit; when nothing fits it pins to the top of the viewport. Alt+F10 moves focus into the toolbar, Escape returns it to the editor.
+- **Single-line preset.** `single-line` editors default to the `inline` toolbar preset (inline formatting, links, history, clear; no block controls).
+
+The same behavior is available from JS: `new RichClay(el, { inline: true, singleLine: true, toolbarOnSelect: false })`. Attribute tokens are derived automatically when the element has `editable`; explicit constructor options win over tokens.
+
+Dynamically added `editable` (or `data-richclay`) elements mount automatically once `RichClay.watch()` is running; `autoInit` starts it in edit mode. Removing the marker attribute destroys that editor.
 
 ## API
 
@@ -92,13 +123,14 @@ RichClay.unregisterButton(id);
 RichClay.presets;
 RichClay.selector;
 RichClay.stripFromClone(document.documentElement);
+RichClay.watch(win, options);
 ```
 
 Options:
 
 | Option | Default | Notes |
 | --- | --- | --- |
-| `toolbar` | `"standard"` | Preset name or ordered array of built-in ids, separators, and custom definitions. |
+| `toolbar` | `"standard"` | Preset name or ordered array of built-in ids, separators, and custom definitions. `false` renders no toolbar (shortcuts stay active). |
 | `toolbarContainer` | `null` | Element or selector. Defaults to inline above the editor. |
 | `sanitize` | `{}` | DOMPurify config merged over the default allowlist. |
 | `placeholder` | `""` | Visual placeholder plus screen-reader description while empty. |
@@ -114,9 +146,12 @@ Options:
 Presets:
 
 - `minimal`: bold, italic, link, unordered list.
+- `inline`: inline formatting, inline code, link, unlink, undo/redo, clear formatting (no block controls).
 - `standard`: block menu, inline formatting, inline code, link, unlink, lists, quote, indent/outdent, undo/redo, clear formatting.
 
 Toolbar arrays are the extension surface. Include built-in ids, omit ids to remove buttons, change order to reorder, and use `{ type: "separator" }` for an explicit separator.
+
+Keyboard shortcuts come from the button registry plus your toolbar definitions, so they stay active even with `toolbar: false`. Unregister a button to remove its shortcut.
 
 Built-in control ids are `blockMenu`, `bold`, `italic`, `underline`, `strikethrough`, `code`, `link`, `unlink`, `unorderedList`, `orderedList`, `quote`, `outdent`, `indent`, `undo`, `redo`, and `clearFormatting`.
 

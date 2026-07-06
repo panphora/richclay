@@ -214,6 +214,7 @@ test("consumeInertContenteditable restores and normalizes the editable value", (
   assert.equal(consumeInertContenteditable(preserved), "false");
   assert.equal(preserved.getAttribute("contenteditable"), "false");
   assert.equal(preserved.hasAttribute("inert-contenteditable"), false);
+  assert.equal(preserved.hasAttribute("data-richclay-runtime-contenteditable"), false);
 
   const plaintext = make("plaintext-only");
   consumeInertContenteditable(plaintext);
@@ -222,6 +223,7 @@ test("consumeInertContenteditable restores and normalizes the editable value", (
   const coerced = make("garbage");
   consumeInertContenteditable(coerced);
   assert.equal(coerced.getAttribute("contenteditable"), "true");
+  assert.equal(coerced.getAttribute("data-richclay-runtime-contenteditable"), "true");
 
   const none = make(null);
   assert.equal(consumeInertContenteditable(none), null);
@@ -248,7 +250,8 @@ test("full Hyperclay round-trip: edit, save-strip on a clone, rehydrate from the
   const saved = clone.querySelector("[data-richclay]");
   assert.equal(saved.hasAttribute("data-richclay"), true);
   assert.equal(saved.hasAttribute("contenteditable"), false);
-  assert.equal(saved.getAttribute("inert-contenteditable"), "true");
+  assert.equal(saved.hasAttribute("inert-contenteditable"), false);
+  assert.equal(saved.hasAttribute("data-richclay-runtime-contenteditable"), false);
   assert.equal(saved.hasAttribute("class"), false);
   assert.equal(clone.querySelector("[data-richclay-toolbar]"), null);
   assert.match(saved.innerHTML, /<strong>bold<\/strong>/);
@@ -266,4 +269,55 @@ test("full Hyperclay round-trip: edit, save-strip on a clone, rehydrate from the
   assert.equal(rehydrated.element.hasAttribute("inert-contenteditable"), false);
   assert.match(rehydrated.getHTML(), /<strong>bold<\/strong>/);
   assert.equal(document.querySelector("[data-richclay-toolbar]") !== null, true);
+});
+
+test("richclay-added contenteditable is removed on save, and a legacy inert-contenteditable self-heals", () => {
+  setupDom('<!doctype html><html><body><div data-richclay inert-contenteditable="true"><p>Old file</p></div></body></html>', "https://example.test/?editmode=true");
+  window.hyperclay = { isEditMode: true, beforeSave() {} };
+  new RichClay(document.querySelector("[data-richclay]"), { Squire: FakeSquire, toolbar: "minimal" });
+
+  const clone = document.documentElement.cloneNode(true);
+  stripRichClayFromClone(clone);
+  const saved = clone.querySelector("[data-richclay]");
+  assert.equal(saved.hasAttribute("contenteditable"), false);
+  assert.equal(saved.hasAttribute("inert-contenteditable"), false);
+  assert.equal(saved.hasAttribute("data-richclay-runtime-contenteditable"), false);
+});
+
+test("author inert-contenteditable=false round-trips through activation and save", () => {
+  setupDom('<!doctype html><html><body><div data-richclay inert-contenteditable="false"><p>x</p></div></body></html>', "https://example.test/?editmode=true");
+  window.hyperclay = { isEditMode: true, beforeSave() {} };
+  const editor = new RichClay(document.querySelector("[data-richclay]"), { Squire: FakeSquire, toolbar: "minimal" });
+  assert.equal(editor.element.getAttribute("contenteditable"), "true");
+
+  const clone = document.documentElement.cloneNode(true);
+  stripRichClayFromClone(clone);
+  assert.equal(clone.querySelector("[data-richclay]").getAttribute("inert-contenteditable"), "false");
+  assert.equal(clone.querySelector("[data-richclay]").hasAttribute("contenteditable"), false);
+});
+
+test("destroy leaves author-provided contenteditable in place", () => {
+  setupDom('<!doctype html><html><body><div data-richclay contenteditable="true"><p>x</p></div></body></html>');
+  const element = document.querySelector("[data-richclay]");
+  const editor = new RichClay(element, { Squire: FakeSquire, toolbar: "minimal" });
+  editor.destroy();
+  assert.equal(element.getAttribute("contenteditable"), "true");
+});
+
+test("destroy restores the author's original non-true contenteditable value", () => {
+  setupDom('<!doctype html><html><body><div data-richclay contenteditable="false"><p>x</p></div></body></html>');
+  const element = document.querySelector("[data-richclay]");
+  const editor = new RichClay(element, { Squire: FakeSquire, toolbar: "minimal" });
+  assert.equal(element.getAttribute("contenteditable"), "true");
+  editor.destroy();
+  assert.equal(element.getAttribute("contenteditable"), "false");
+});
+
+test("save-strip keeps empty inline wrappers that carry attributes", () => {
+  setupDom('<!doctype html><html><body><div data-richclay contenteditable="true"><p><span class="icon"></span>Text<em></em></p></div></body></html>');
+  const clone = document.documentElement.cloneNode(true);
+  stripRichClayFromClone(clone);
+  const editor = clone.querySelector("[data-richclay]");
+  assert.equal(editor.querySelector("span.icon") !== null, true);
+  assert.equal(editor.querySelector("em"), null);
 });

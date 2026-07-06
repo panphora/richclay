@@ -1,9 +1,10 @@
-export const RICHCLAY_SELECTOR = "[data-richclay], [richclay]";
+export const RICHCLAY_SELECTOR = "[data-richclay], [richclay], [editable]";
 export const CHROME_SELECTOR =
-  "[data-richclay-toolbar], [data-richclay-menu], [data-richclay-dialog], [data-richclay-live]";
+  "[data-richclay-toolbar], [data-richclay-menu], [data-richclay-dialog], [data-richclay-live], [data-richclay-float]";
 
 const runtimeClasses = [
   "richclay-editor",
+  "richclay-inline",
   "richclay-active",
   "richclay-empty",
   "richclay-focused"
@@ -38,6 +39,22 @@ export function shouldActivateEditor(options = {}, win = window) {
   return isHyperclayEditMode(win);
 }
 
+// The editable attribute's value is a space-separated token list, like class.
+// Unknown tokens are ignored for forward compatibility.
+export function parseEditableOptions(element) {
+  if (!element.hasAttribute("editable")) return null;
+  const tokens = new Set(
+    (element.getAttribute("editable") || "").trim().split(/\s+/).filter(Boolean)
+  );
+  const options = {
+    inline: true,
+    singleLine: tokens.has("single-line"),
+    toolbarOnSelect: tokens.has("toolbar-on-select")
+  };
+  if (tokens.has("no-toolbar")) options.toolbar = false;
+  return options;
+}
+
 export function installHyperclayBridge(win = window) {
   if (installedWindows.has(win)) return;
   const beforeSave = win.hyperclay?.beforeSave;
@@ -51,33 +68,56 @@ export function stripRichClayFromClone(docElem) {
   docElem.querySelectorAll?.(CHROME_SELECTOR).forEach(node => node.remove());
 
   docElem.querySelectorAll?.(RICHCLAY_SELECTOR).forEach(region => {
-    if (region.hasAttribute("contenteditable")) {
-      const originalValue = region.getAttribute("contenteditable");
-      region.setAttribute("inert-contenteditable", originalValue);
-      region.removeAttribute("contenteditable");
-    }
-
-    runtimeClasses.forEach(className => region.classList.remove(className));
-    if (region.getAttribute("class") === "") region.removeAttribute("class");
-
-    removeRuntimeAttribute(region, "role", "data-richclay-runtime-role");
-    removeRuntimeAttribute(region, "aria-multiline", "data-richclay-runtime-aria-multiline");
-    removeRuntimeAttribute(region, "no-undo", "data-richclay-runtime-no-undo");
-    removeRuntimeDescribedBy(region);
-
-    region.removeAttribute("data-richclay-active");
-    region.removeAttribute("data-richclay-placeholder");
-    region.removeAttribute("data-richclay-runtime-role");
-    region.removeAttribute("data-richclay-runtime-aria-multiline");
-    region.removeAttribute("data-richclay-runtime-no-undo");
-    region.removeAttribute("data-richclay-runtime-describedby");
-    region.removeAttribute("data-richclay-runtime-contenteditable");
+    removeRuntimeState(region, "save");
+    if (region.matches?.('[editable~="single-line"]')) unwrapLoneSingleLineBlock(region);
     region.querySelectorAll("#squire-selection-start, #squire-selection-end").forEach(node => {
       node.remove();
     });
     region.querySelectorAll(".squire-image-resize-container").forEach(node => node.remove());
     stripZeroWidthArtifacts(region);
   });
+}
+
+// Shared runtime-state removal used by both the save strip (on the cloned
+// document) and destroy() (on the live element). The contenteditable marker
+// records provenance: "true" means richclay added the attribute; any other
+// value is the author's original non-"true" value; no marker with the
+// attribute present means the author wrote contenteditable="true" themselves.
+export function removeRuntimeState(region, mode) {
+  const origin = region.getAttribute("data-richclay-runtime-contenteditable");
+
+  if (region.hasAttribute("contenteditable")) {
+    if (origin === "true") {
+      region.removeAttribute("contenteditable");
+    } else if (origin) {
+      if (mode === "destroy") {
+        region.setAttribute("contenteditable", origin);
+      } else {
+        region.setAttribute("inert-contenteditable", origin);
+        region.removeAttribute("contenteditable");
+      }
+    } else if (mode === "save") {
+      region.setAttribute("inert-contenteditable", region.getAttribute("contenteditable"));
+      region.removeAttribute("contenteditable");
+    }
+    // destroy with no marker: the author wrote contenteditable; leave it.
+  }
+
+  runtimeClasses.forEach(className => region.classList.remove(className));
+  if (region.getAttribute("class") === "") region.removeAttribute("class");
+
+  removeRuntimeAttribute(region, "role", "data-richclay-runtime-role");
+  removeRuntimeAttribute(region, "aria-multiline", "data-richclay-runtime-aria-multiline");
+  removeRuntimeAttribute(region, "no-undo", "data-richclay-runtime-no-undo");
+  removeRuntimeDescribedBy(region);
+
+  region.removeAttribute("data-richclay-active");
+  region.removeAttribute("data-richclay-placeholder");
+  region.removeAttribute("data-richclay-runtime-role");
+  region.removeAttribute("data-richclay-runtime-aria-multiline");
+  region.removeAttribute("data-richclay-runtime-no-undo");
+  region.removeAttribute("data-richclay-runtime-describedby");
+  region.removeAttribute("data-richclay-runtime-contenteditable");
 }
 
 function stripZeroWidthArtifacts(region) {
@@ -97,8 +137,24 @@ function stripZeroWidthArtifacts(region) {
   }
   // Drop inline wrappers Squire left empty once the caret placeholder is gone.
   region.querySelectorAll("b, i, u, s, em, strong, code, sub, sup, span").forEach(el => {
-    if (el.children.length === 0 && (el.textContent || "") === "") el.remove();
+    if (el.children.length === 0 && (el.textContent || "") === "" && el.attributes.length === 0) {
+      el.remove();
+    }
   });
+}
+
+// Safety net for single-line regions: with the fidelity-first attach Squire
+// never wraps the content, but if a lone bare <P> wrapper ever appears, the
+// saved file must not contain it.
+function unwrapLoneSingleLineBlock(region) {
+  const meaningful = Array.from(region.childNodes).filter(
+    node => node.nodeType !== 3 || (node.nodeValue || "").trim() !== ""
+  );
+  if (meaningful.length !== 1) return;
+  const block = meaningful[0];
+  if (block.nodeType !== 1 || block.nodeName !== "P" || block.attributes.length > 0) return;
+  while (block.firstChild) region.insertBefore(block.firstChild, block);
+  block.remove();
 }
 
 export function consumeInertContenteditable(element) {
@@ -108,6 +164,12 @@ export function consumeInertContenteditable(element) {
   if (!["false", "plaintext-only"].includes(value)) value = "true";
   element.setAttribute("contenteditable", value);
   element.removeAttribute("inert-contenteditable");
+  if (value === "true") {
+    // Self-heal: a saved inert "true" is redundant with what activation
+    // re-adds. Mark it runtime so the next save drops it from the file
+    // instead of round-tripping it forever.
+    element.setAttribute("data-richclay-runtime-contenteditable", "true");
+  }
   return value;
 }
 

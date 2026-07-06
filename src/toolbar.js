@@ -222,8 +222,10 @@ export class Toolbar {
     }
 
     if (key === "Escape") {
+      const hadOpenMenu = Array.from(this.menus.values()).some(entry => !entry.menu.hidden);
       this.closeMenus();
-      current.button.focus();
+      if (hadOpenMenu) current.button.focus();
+      else this.editor.focus();
     }
   }
 

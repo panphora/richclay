@@ -137,3 +137,53 @@ function normalizeLinks(root) {
     }
   });
 }
+
+const INLINE_SANITIZE_EXTENSIONS = {
+  ADD_TAGS: ["img"],
+  ADD_ATTR: ["class", "id", "src", "alt", "width", "height"]
+};
+
+// Inline editors live inside real page markup, so paste/setHTML ingress keeps
+// structural attributes and images that the card allowlist strips. Everything
+// XSS-relevant (scripts, on* handlers, javascript: URLs) stays forbidden.
+export function inlineSanitizeConfig(config = {}) {
+  return {
+    ...config,
+    ADD_TAGS: [...new Set([...INLINE_SANITIZE_EXTENSIONS.ADD_TAGS, ...(config.ADD_TAGS || [])])],
+    ADD_ATTR: [...new Set([...INLINE_SANITIZE_EXTENSIONS.ADD_ATTR, ...(config.ADD_ATTR || [])])],
+    ALLOW_DATA_ATTR: config.ALLOW_DATA_ATTR ?? true
+  };
+}
+
+const FLATTEN_SELECTOR =
+  "p, div, h1, h2, h3, h4, h5, h6, blockquote, pre, ul, ol, li, figure, figcaption, table, thead, tbody, tr, td, th";
+
+export function flattenFragmentToSingleLine(fragment) {
+  const doc = fragment.ownerDocument || document;
+  fragment.querySelectorAll?.("br").forEach(br => br.replaceWith(doc.createTextNode(" ")));
+  let block = fragment.querySelector?.(FLATTEN_SELECTOR);
+  while (block) {
+    const parent = block.parentNode;
+    parent.insertBefore(doc.createTextNode(" "), block);
+    while (block.firstChild) parent.insertBefore(block.firstChild, block);
+    parent.insertBefore(doc.createTextNode(" "), block);
+    block.remove();
+    block = fragment.querySelector(FLATTEN_SELECTOR);
+  }
+  collapseFragmentWhitespace(fragment, doc);
+  return fragment;
+}
+
+function collapseFragmentWhitespace(fragment, doc) {
+  fragment.normalize?.();
+  const walker = doc.createTreeWalker(fragment, 4 /* NodeFilter.SHOW_TEXT */);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  nodes.forEach(node => {
+    node.nodeValue = node.nodeValue.replace(/\s+/g, " ");
+  });
+  const first = fragment.firstChild;
+  if (first?.nodeType === 3) first.nodeValue = first.nodeValue.replace(/^\s+/, "");
+  const last = fragment.lastChild;
+  if (last?.nodeType === 3) last.nodeValue = last.nodeValue.replace(/\s+$/, "");
+}

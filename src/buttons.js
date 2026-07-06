@@ -33,6 +33,18 @@ const icons = {
 
 export const presets = {
   minimal: ["bold", "italic", "link", "unorderedList"],
+  inline: [
+    "bold",
+    "italic",
+    "underline",
+    "strikethrough",
+    "code",
+    "link",
+    "unlink",
+    "undo",
+    "redo",
+    "clearFormatting"
+  ],
   standard: [
     "blockMenu",
     "bold",

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>richclay inline editing demo</title>
+<link rel="stylesheet" href="../richclay.css">
+<style>
+  body { margin: 0; font: 17px/1.6 Georgia, serif; color: #1f2430; background: #fbfaf8; }
+  .page { max-width: 640px; margin: 0 auto; padding: 48px 24px 40vh; }
+  h1 { font-size: 2.4rem; line-height: 1.15; margin: 0 0 8px; }
+  h2 { font-size: 1.4rem; margin: 2em 0 0.5em; }
+  .byline { color: #667085; font-style: italic; margin: 0 0 40px; }
+  .badge { background: #0f766e; color: #f6f7f9; border-radius: 4px; padding: 1px 7px; font-size: 0.8em; font-family: system-ui, sans-serif; font-style: normal; }
+  .full-bleed { margin: 56px calc(50% - 50vw); padding: 32px calc(50vw - 50%); background: #eef0f4; }
+  .hint { color: #98a2b3; font-size: 0.85rem; font-family: system-ui, sans-serif; }
+</style>
+</head>
+<body>
+  <div class="page">
+    <p class="hint">Everything below with a dashed outline on hover is editable in place. Focus a region to get its floating toolbar; scroll while editing to watch it flip above &rarr; below &rarr; side rail &rarr; pinned. Alt+F10 focuses the toolbar, Escape returns.</p>
+
+    <h1 editable="single-line">Breathing life into clay</h1>
+    <p class="byline" editable="single-line toolbar-on-select">by <span class="badge">David</span> &middot; toolbar appears only while text is selected</p>
+
+    <div editable>
+      <p>This whole region is <strong>multi-line rich text</strong>. It keeps the page's own typography because richclay adds no card chrome in inline mode: no border, no background, no padding, no minimum height. The <span class="badge">badge</span> you see here is a styled span with a class, and activation must leave it exactly as authored.</p>
+      <p>Try selecting text and using the toolbar, or the usual shortcuts. Links get the safe-URL dialog. Undo and redo live inside this region's own history.</p>
+      <h2>Make it tall</h2>
+      <p>The paragraphs below exist to make this region taller than your viewport, so you can watch the toolbar walk its placement ladder while you scroll.</p>
+      <p>One. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+      <p>Two. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p>
+      <p>Three. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.</p>
+      <p>Four. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>
+      <p>Five. Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium.</p>
+      <p>Six. Totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.</p>
+      <p>Seven. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores.</p>
+      <p>Eight. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit.</p>
+      <p>Nine. Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil molestiae consequatur.</p>
+      <p>Ten. At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque.</p>
+    </div>
+
+    <div class="full-bleed" editable>
+      <p>This region runs edge to edge, so there is no page margin for the rail. Scroll until both its top and bottom are out of view: with nowhere else to go, the toolbar pins to the top of the viewport.</p>
+      <p>Filler one. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore.</p>
+      <p>Filler two. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo.</p>
+      <p>Filler three. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla.</p>
+      <p>Filler four. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim.</p>
+      <p>Filler five. Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium.</p>
+      <p>Filler six. Totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae.</p>
+    </div>
+
+    <p editable="no-toolbar">This paragraph is editable with <em>no toolbar at all</em>. Keyboard shortcuts still work: try Cmd/Ctrl+B on a selection.</p>
+  </div>
+
+  <script src="../vendor/purify.min.js"></script>
+  <script src="../vendor/squire.js"></script>
+  <script src="../richclay.js"></script>
+  <script>
+    RichClay.init();
+  </script>
+</body>
+</html>
