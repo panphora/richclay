@@ -94,6 +94,33 @@ Put an `editable` attribute on any element and it becomes a rich text editor in 
 
 Unknown tokens are ignored. In Hyperclay pages, `editable` activates only in edit mode. In view mode and in the saved file it is an inert marker: the saved markup contains no `contenteditable` or other runtime state, just the author's content plus the attribute.
 
+### Setup
+
+In a Hyperclay app, load hyperclayjs with a preset that includes richclay (`smooth-sailing` or `everything`) and add the attribute. richclay is bundled inside hyperclayjs and self-activates in edit mode; there is nothing else to load and no init call:
+
+```html
+<script src="https://hyperclay.com/public/js/hyperclay.js?preset=smooth-sailing" type="module"></script>
+
+<h1 editable="single-line">Page title</h1>
+```
+
+On a standalone page, load the same three scripts as the Quick Start and call `RichClay.init()`; it picks up `[editable]` elements alongside `[data-richclay]`:
+
+```html
+<link rel="stylesheet" href="richclay.css">
+<script src="vendor/purify.min.js"></script>
+<script src="vendor/squire.js"></script>
+<script src="richclay.js"></script>
+
+<h1 editable="single-line">Page title</h1>
+
+<script>
+  RichClay.init();
+</script>
+```
+
+The self-contained `dist/richclay.min.js` (Squire and DOMPurify bundled, the build hyperclayjs vendors) needs no init call in Hyperclay pages: it auto-activates in edit mode. `demo/inline.html` is a working standalone example of every token and toolbar placement.
+
 Differences from card editors (`data-richclay`):
 
 - **Content fidelity.** Activation never rewrites the element's content: no sanitize pass, no block re-wrapping. Sanitization still guards paste and `setHTML()`, with an allowlist extended for real page markup (`class`, `id`, `data-*`, `img`).
