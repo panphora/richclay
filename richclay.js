@@ -1177,6 +1177,7 @@ var RichClayBundle = (() => {
       this.float = null;
       this._onToolbarKey = null;
       this._onFloatFocusOut = null;
+      this._onDocPointerDown = null;
       this.liveRegion = null;
       this.description = null;
       this.dialog = null;
@@ -1646,6 +1647,15 @@ var RichClayBundle = (() => {
       this.float = new FloatingToolbar(this, controls);
       this._onFloatFocusOut = (event) => this.scheduleFloatTeardown(event);
       this.float.root.addEventListener("focusout", this._onFloatFocusOut);
+      this._onDocPointerDown = (event) => {
+        if (this.ownsFocusTarget(event.target)) return;
+        const doc = this.element.ownerDocument;
+        if (doc.activeElement && this.ownsFocusTarget(doc.activeElement)) {
+          doc.activeElement.blur?.();
+        }
+        this.teardownFloatingToolbar();
+      };
+      this.element.ownerDocument.addEventListener("pointerdown", this._onDocPointerDown, true);
       this.toolbar = this.float.toolbar;
       this.toolbar.update();
       if (this.options.toolbarOnSelect) this.updateFloatVisibility();
@@ -1655,6 +1665,10 @@ var RichClayBundle = (() => {
       if (this._onFloatFocusOut) {
         this.float.root.removeEventListener("focusout", this._onFloatFocusOut);
         this._onFloatFocusOut = null;
+      }
+      if (this._onDocPointerDown) {
+        this.element.ownerDocument.removeEventListener("pointerdown", this._onDocPointerDown, true);
+        this._onDocPointerDown = null;
       }
       this.float.destroy();
       this.float = null;

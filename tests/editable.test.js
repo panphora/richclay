@@ -51,6 +51,26 @@ test("inline editors mount a floating toolbar on focus and tear it down on blur"
   assert.equal(document.querySelector("[data-richclay-float]"), null);
 });
 
+test("a pointer press outside the editor dismisses the floating toolbar", () => {
+  setupDom('<!doctype html><html><body><div editable><p>x</p></div><p id="outside">chrome</p></body></html>');
+  const element = document.querySelector("[editable]");
+  new RichClay(element, { Squire: FakeSquire });
+
+  element.dispatchEvent(new window.FocusEvent("focus"));
+  assert.equal(document.querySelector("[data-richclay-float]") !== null, true);
+
+  // clicking non-focusable chrome fires no blur on a contenteditable, only a
+  // pointer press: the document listener alone must dismiss the float
+  document.getElementById("outside").dispatchEvent(new window.Event("pointerdown", { bubbles: true }));
+  assert.equal(document.querySelector("[data-richclay-float]"), null);
+
+  // presses the editor owns leave the float alone
+  element.dispatchEvent(new window.FocusEvent("focus"));
+  assert.equal(document.querySelector("[data-richclay-float]") !== null, true);
+  element.firstElementChild.dispatchEvent(new window.Event("pointerdown", { bubbles: true }));
+  assert.equal(document.querySelector("[data-richclay-float]") !== null, true);
+});
+
 test("single-line editors suppress Enter and set aria-multiline=false", () => {
   setupDom('<!doctype html><html><body><h1 editable="single-line">Title</h1></body></html>');
   const element = document.querySelector("[editable]");

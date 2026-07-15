@@ -76,6 +76,7 @@ export default class RichClay {
     this.float = null;
     this._onToolbarKey = null;
     this._onFloatFocusOut = null;
+    this._onDocPointerDown = null;
     this.liveRegion = null;
     this.description = null;
     this.dialog = null;
@@ -638,6 +639,19 @@ export default class RichClay {
     // own focusout too.
     this._onFloatFocusOut = event => this.scheduleFloatTeardown(event);
     this.float.root.addEventListener("focusout", this._onFloatFocusOut);
+    // A press on non-focusable page chrome never blurs a contenteditable, so
+    // blur/focusout alone can't dismiss the float. Watch the document
+    // (capture, so stopped events still count) and dismiss on any pointer
+    // press the editor doesn't own, releasing focus with it.
+    this._onDocPointerDown = event => {
+      if (this.ownsFocusTarget(event.target)) return;
+      const doc = this.element.ownerDocument;
+      if (doc.activeElement && this.ownsFocusTarget(doc.activeElement)) {
+        doc.activeElement.blur?.();
+      }
+      this.teardownFloatingToolbar();
+    };
+    this.element.ownerDocument.addEventListener("pointerdown", this._onDocPointerDown, true);
     this.toolbar = this.float.toolbar;
     this.toolbar.update();
     if (this.options.toolbarOnSelect) this.updateFloatVisibility();
@@ -648,6 +662,10 @@ export default class RichClay {
     if (this._onFloatFocusOut) {
       this.float.root.removeEventListener("focusout", this._onFloatFocusOut);
       this._onFloatFocusOut = null;
+    }
+    if (this._onDocPointerDown) {
+      this.element.ownerDocument.removeEventListener("pointerdown", this._onDocPointerDown, true);
+      this._onDocPointerDown = null;
     }
     this.float.destroy();
     this.float = null;
