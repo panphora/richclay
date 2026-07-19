@@ -53,5 +53,9 @@
   "devDependencies": {
     "esbuild": "^0.25.5",
     "jsdom": "^26.1.0"
+  },
+  "hyper": {
+    "kind": "lib",
+    "status": "active"
   }
 }
