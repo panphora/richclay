@@ -16,6 +16,12 @@ export function setupDom(html = "<!doctype html><html><body></body></html>", url
   return dom;
 }
 
+// jsdom reports an empty navigator.platform, so shortcut tests have to state
+// which platform they mean instead of inheriting whatever the host looks like.
+export function setPlatform(win, platform) {
+  Object.defineProperty(win.navigator, "platform", { value: platform, configurable: true });
+}
+
 export class FakeSquire {
   constructor(root, config = {}) {
     this.root = root;
@@ -28,6 +34,9 @@ export class FakeSquire {
     this.selection = root.ownerDocument.createRange();
     this.selection.setStart(root, 0);
     this.selection.collapse(true);
+    // Squire exposes its built-in keydown handlers here; richclay repoints the
+    // macOS Ctrl delete bindings at them.
+    this._keyHandlers = { Delete() {}, Backspace() {} };
     root.setAttribute("contenteditable", "true");
     this.setHTML("");
   }
@@ -220,6 +229,13 @@ export class FakeSquire {
 
   toggleCode() {
     this.commands.push("toggleCode");
+    return this;
+  }
+
+  changeFormat(add, remove) {
+    this.commands.push(["changeFormat", add?.tag || null, remove?.tag || null]);
+    if (add?.tag) this.formats.add(add.tag.toUpperCase());
+    if (remove?.tag) this.formats.delete(remove.tag.toUpperCase());
     return this;
   }
 

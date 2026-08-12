@@ -246,6 +246,8 @@ Keyboard shortcuts:
 - Ctrl/Cmd+Z - undo
 - Ctrl/Cmd+Shift+Z - redo
 
+`Mod` binds to Cmd on macOS and iOS and to Ctrl everywhere else, never both, so the platform's own Ctrl bindings keep working. On macOS, Ctrl+D and Ctrl+H stay forward delete and backward delete.
+
 Keyboard-only walkthrough:
 
 1. Tab into the toolbar.

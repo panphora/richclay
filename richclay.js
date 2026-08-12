@@ -84,11 +84,14 @@ var RichClayBundle = (() => {
   function createDefaultRegistry() {
     return new Map(defaultButtons.map((button) => [button.id, button]));
   }
-  function formatShortcut(shortcut) {
+  function isApplePlatform(win = globalThis) {
+    const nav = win?.navigator;
+    if (!nav) return false;
+    return /Mac|iPhone|iPad|iPod/.test(nav.platform || nav.userAgent || "");
+  }
+  function formatShortcut(shortcut, win = globalThis) {
     if (!shortcut) return "";
-    const platform = globalThis.navigator?.platform || "";
-    const mod = /Mac|iPhone|iPad|iPod/.test(platform) ? "Cmd" : "Ctrl";
-    return shortcut.replace("Mod", mod);
+    return shortcut.replace("Mod", isApplePlatform(win) ? "Cmd" : "Ctrl");
   }
   var defaultButtons = [
     toggle("bold", "Bold", icons.bold, "Mod+B", "inline", (editor) => editor.toggleFormat("B", "bold", "removeBold")),
@@ -116,13 +119,16 @@ var RichClayBundle = (() => {
       "inline",
       (editor) => editor.toggleFormat("S", "strikethrough", "removeStrikethrough")
     ),
+    // No shortcut. One keystroke turning a paragraph of prose into a code block is
+    // a sharp edge in an editor whose DOM is the saved file, and Mod+D also shadows
+    // the browser's own bookmark shortcut. The toolbar button stays.
     toggle(
       "code",
       "Code",
       icons.code,
-      "Mod+D",
+      null,
       "inline",
-      (editor) => editor.squire.toggleCode(),
+      (editor) => editor.toggleCode(),
       (editor) => editor.selectionHasFormat("CODE") || editor.selectionHasFormat("PRE")
     ),
     {
@@ -263,6 +269,140 @@ var RichClayBundle = (() => {
       run: (editor) => editor.setBlockType(tag),
       isActive: (editor) => editor.pathHas(tag)
     };
+  }
+
+  // src/normalize.js
+  var INLINE_NODE_NAMES = /^(?:#text|A(?:BBR|CRONYM)?|B(?:R|D[IO])?|C(?:ITE|ODE)|D(?:ATA|EL|FN)|EM|FONT|HR|I(?:FRAME|MG|NPUT|NS)?|KBD|Q|R(?:P|T|UBY)|S(?:AMP|MALL|PAN|TR(?:IKE|ONG)|U[BP])?|TIME|U|VAR|WBR)$/;
+  var NOT_WHITESPACE = /[^ \t\r\n]/;
+  var PRESERVES_WHITESPACE = /^(?:pre|break-spaces)/;
+  var ELEMENT_NODE = 1;
+  var TEXT_NODE = 3;
+  var COMMENT_NODE = 8;
+  function isInlineNode(node) {
+    const type = node.nodeType;
+    if (type === TEXT_NODE || type === COMMENT_NODE) return true;
+    if (type !== ELEMENT_NODE) return false;
+    if (!INLINE_NODE_NAMES.test(node.nodeName)) return false;
+    return Array.from(node.childNodes).every(isInlineNode);
+  }
+  function isBlockContainer(element) {
+    return Array.from(element.childNodes).some((node) => !isInlineNode(node));
+  }
+  var BARE_ROOT_TAG = "DIV";
+  function normalizeEditorRoot(root, options = {}) {
+    const { blockTag = "P", wrapBareRoot = false, onBareRootWrapped } = options;
+    dropFormattingWhitespace(root);
+    wrapStrayInlineChildren(root, blockTag, wrapBareRoot, onBareRootWrapped);
+    return root;
+  }
+  function editorRootNeedsNormalization(root, { wrapBareRoot = false } = {}) {
+    if (!isBlockContainer(root)) return wrapBareRoot && Boolean(root.firstChild);
+    return Array.from(root.childNodes).some(isInlineNode) || hasNestedFormattingWhitespace(root);
+  }
+  function hasNestedFormattingWhitespace(element) {
+    return Array.from(element.children).some((child) => {
+      if (!isBlockContainer(child)) return false;
+      const ownWhitespace = !preservesWhitespace(child) && Array.from(child.childNodes).some(
+        (node) => node.nodeType === TEXT_NODE && !NOT_WHITESPACE.test(node.nodeValue)
+      );
+      return ownWhitespace || hasNestedFormattingWhitespace(child);
+    });
+  }
+  function dropFormattingWhitespace(element) {
+    if (!isBlockContainer(element)) return;
+    if (!preservesWhitespace(element)) {
+      Array.from(element.childNodes).forEach((child) => {
+        if (child.nodeType === TEXT_NODE && !NOT_WHITESPACE.test(child.nodeValue)) child.remove();
+      });
+    }
+    Array.from(element.children).forEach(dropFormattingWhitespace);
+  }
+  function wrapStrayInlineChildren(root, blockTag, wrapBareRoot, onBareRootWrapped) {
+    if (!isBlockContainer(root)) {
+      if (!wrapBareRoot || !root.firstChild) return;
+      const wrapper = root.ownerDocument.createElement(BARE_ROOT_TAG);
+      while (root.firstChild) wrapper.appendChild(root.firstChild);
+      root.appendChild(wrapper);
+      onBareRootWrapped?.(root, wrapper);
+      return;
+    }
+    let run = [];
+    const flush = () => {
+      const nodes = run;
+      run = [];
+      if (!nodes.some((node) => node.nodeType !== COMMENT_NODE)) return;
+      const block = root.ownerDocument.createElement(blockTag);
+      root.insertBefore(block, nodes[0]);
+      nodes.forEach((node) => block.appendChild(node));
+    };
+    Array.from(root.childNodes).forEach((child) => {
+      if (isInlineNode(child)) run.push(child);
+      else flush();
+    });
+    flush();
+  }
+  function preservesWhitespace(element) {
+    if (element.nodeName === "PRE") return true;
+    const view = element.ownerDocument.defaultView;
+    const whiteSpace = view?.getComputedStyle?.(element)?.whiteSpace || "";
+    return PRESERVES_WHITESPACE.test(whiteSpace);
+  }
+  function captureRange(root, range) {
+    return {
+      start: captureBoundary(root, range.startContainer, range.startOffset),
+      end: captureBoundary(root, range.endContainer, range.endOffset),
+      collapsed: range.collapsed
+    };
+  }
+  function restoreRange(root, range, saved) {
+    applyBoundary(range, "setStart", root, saved.start);
+    if (saved.collapsed) range.collapse(true);
+    else applyBoundary(range, "setEnd", root, saved.end);
+  }
+  function captureBoundary(root, container, offset) {
+    if (container !== root && root.contains(container) && !isDroppedWhitespace(container)) {
+      return { container, offset };
+    }
+    const children = Array.from(root.childNodes);
+    const index = container === root ? offset : children.indexOf(rootChildOf(root, container));
+    const at = Math.max(0, index);
+    return { after: children.slice(at), before: children.slice(0, at).reverse() };
+  }
+  function applyBoundary(range, method, root, boundary) {
+    if (boundary.container && root.contains(boundary.container)) {
+      range[method](boundary.container, Math.min(boundary.offset, nodeLength(boundary.container)));
+      return;
+    }
+    const after = boundary.after?.find((node) => root.contains(node));
+    if (after) {
+      range[method](caretEdge(after, true), 0);
+      return;
+    }
+    const before = boundary.before?.find((node) => root.contains(node));
+    if (before) {
+      const edge = caretEdge(before, false);
+      range[method](edge, nodeLength(edge));
+      return;
+    }
+    range[method](root, 0);
+  }
+  function isDroppedWhitespace(node) {
+    return node.nodeType === TEXT_NODE && !NOT_WHITESPACE.test(node.nodeValue) && Boolean(node.parentNode) && node.parentNode.nodeType === ELEMENT_NODE && isBlockContainer(node.parentNode) && !preservesWhitespace(node.parentNode);
+  }
+  function rootChildOf(root, node) {
+    let current = node;
+    while (current && current.parentNode && current.parentNode !== root) current = current.parentNode;
+    return current;
+  }
+  function caretEdge(node, first) {
+    let current = node;
+    while (current.nodeType === ELEMENT_NODE && current.firstChild && current.nodeName !== "BR") {
+      current = first ? current.firstChild : current.lastChild;
+    }
+    return current;
+  }
+  function nodeLength(node) {
+    return node.nodeType === TEXT_NODE ? node.nodeValue.length : node.childNodes.length;
   }
 
   // src/hyperclay.js
@@ -797,7 +937,7 @@ var RichClayBundle = (() => {
     const button = doc.createElement("button");
     button.type = "button";
     button.className = "richclay-button";
-    const shortcut = formatShortcut(def.shortcut);
+    const shortcut = formatShortcut(def.shortcut, doc.defaultView);
     const label = shortcut ? `${def.ariaLabel || def.label} (${shortcut})` : def.ariaLabel || def.label;
     button.setAttribute("aria-label", label);
     button.title = label;
@@ -1145,6 +1285,10 @@ var RichClayBundle = (() => {
   var watchedWindows = /* @__PURE__ */ new WeakSet();
   var globalRegistry = createDefaultRegistry();
   var KEEP_FOCUS = Symbol("richclay-keep-focus");
+  var BLOCK_TAG = "P";
+  var ROOT_TRANSFER_EVENTS = ["cut", "paste", "drop"];
+  var MODIFIER_ORDER = ["Alt", "Ctrl", "Meta", "Shift"];
+  var LEAF_NODE_NAMES = /* @__PURE__ */ new Set(["BR", "HR", "IFRAME", "IMG", "INPUT"]);
   var dialogSeq = 0;
   var defaultOptions = {
     toolbar: "standard",
@@ -1187,6 +1331,9 @@ var RichClayBundle = (() => {
       this._squire = null;
       this._squireListeners = [];
       this._onBeforeInput = null;
+      this._onRootBeforeInput = null;
+      this._onRootKeydown = null;
+      this._onRootTransfer = null;
       this._shortcutKeys = [];
       this._onFocus = () => {
         this.element.classList.add("richclay-focused");
@@ -1299,7 +1446,8 @@ var RichClayBundle = (() => {
       this.active = true;
       ensureStyles(this.element.ownerDocument);
       consumeInertContenteditable(this.element);
-      const initialHTML = this.element.innerHTML;
+      const initialNodes = this.options.inline ? Array.from(this.element.childNodes) : null;
+      const initialHTML = this.options.inline ? null : this.element.innerHTML;
       const Squire = this.options.Squire || this.window.Squire || globalThis.Squire;
       if (!Squire) {
         throw new Error("RichClay requires Squire. Load vendor/squire.js before richclay.js.");
@@ -1307,7 +1455,7 @@ var RichClayBundle = (() => {
       this.setupEditorAttributes();
       this.liveRegion = createLiveRegion(this.element.ownerDocument);
       this._squire = new Squire(this.element, {
-        blockTag: "P",
+        blockTag: BLOCK_TAG,
         sanitizeToDOMFragment: (html, editor) => {
           const fragment = this.sanitizer.sanitizeToDOMFragment(html, editor);
           return this.options.singleLine ? flattenFragmentToSingleLine(fragment) : fragment;
@@ -1317,13 +1465,16 @@ var RichClayBundle = (() => {
         }
       });
       if (this.options.inline) {
-        this.element.innerHTML = initialHTML;
+        this.element.replaceChildren(...initialNodes);
         this.resetSquireUndoBaseline();
       } else {
         this._squire.setHTML(initialHTML);
       }
       this.bindSquire();
       if (this.options.singleLine) this.installSingleLineGuards();
+      if (this.options.inline && !this.options.singleLine) this.installRootGuards();
+      this.installAppleDeleteKeys();
+      this.maskSquireCodeShortcut();
       this.installShortcuts();
       if (this.options.inline) {
         this._onToolbarKey = (event) => {
@@ -1384,6 +1535,19 @@ var RichClayBundle = (() => {
         this.element.ownerDocument.removeEventListener("beforeinput", this._onBeforeInput, true);
         this._onBeforeInput = null;
       }
+      const doc = this.element.ownerDocument;
+      if (this._onRootBeforeInput) {
+        doc.removeEventListener("beforeinput", this._onRootBeforeInput, true);
+        this._onRootBeforeInput = null;
+      }
+      if (this._onRootKeydown) {
+        doc.removeEventListener("keydown", this._onRootKeydown, true);
+        this._onRootKeydown = null;
+      }
+      if (this._onRootTransfer) {
+        ROOT_TRANSFER_EVENTS.forEach((type) => doc.removeEventListener(type, this._onRootTransfer, true));
+        this._onRootTransfer = null;
+      }
       this._squire?.destroy?.();
       this._squire = null;
       this.cleanupEditorAttributes();
@@ -1396,10 +1560,69 @@ var RichClayBundle = (() => {
     restoreSelection() {
       return restoreSquireSelection(this._squire, this.savedSelection);
     }
+    // Squire's invariant is established on the first real edit rather than at
+    // activation, so that opening a page in edit mode never rewrites it. These
+    // listeners capture on the document, so the root is valid before Squire's own
+    // handlers see the event. History inputs are skipped: repairing mid-undo would
+    // fight the stack it is replaying.
+    installRootGuards() {
+      const doc = this.element.ownerDocument;
+      const owns = (event) => this.element.contains(event.target);
+      this._onRootBeforeInput = (event) => {
+        if (!owns(event) || /^history/.test(event.inputType || "")) return;
+        this.ensureRootIsEditable();
+      };
+      this._onRootKeydown = (event) => {
+        if (!owns(event) || event.defaultPrevented || event.isComposing) return;
+        const types = event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey;
+        if (types || ["Backspace", "Delete", "Enter", "Tab"].includes(event.key)) {
+          this.ensureRootIsEditable();
+        }
+      };
+      this._onRootTransfer = (event) => {
+        if (owns(event)) this.ensureRootIsEditable();
+      };
+      doc.addEventListener("beforeinput", this._onRootBeforeInput, true);
+      doc.addEventListener("keydown", this._onRootKeydown, true);
+      ROOT_TRANSFER_EVENTS.forEach((type) => {
+        doc.addEventListener(type, this._onRootTransfer, true);
+      });
+    }
+    // Re-checked rather than latched, because Hyperclay's live sync morphs new DOM
+    // into the region long after activation and can reintroduce a loose text node.
+    ensureRootIsEditable() {
+      if (!this._squire || this.options.singleLine) return;
+      const wrapBareRoot = this.options.inline;
+      if (!editorRootNeedsNormalization(this.element, { wrapBareRoot })) return;
+      const range = getSquireSelection(this._squire);
+      const saved = range ? captureRange(this.element, range) : null;
+      const repair = () => {
+        normalizeEditorRoot(this.element, {
+          blockTag: BLOCK_TAG,
+          wrapBareRoot,
+          onBareRootWrapped: (root, wrapper) => {
+            console.warn(
+              `richclay: wrapped this region's loose text in a <div> so multi-line editing works. Wrap the content in your own block element to keep the markup you wrote, or use editable="single-line" if it is meant to be one line.`,
+              root,
+              wrapper
+            );
+          }
+        });
+      };
+      if (typeof this._squire.modifyDocument === "function") this._squire.modifyDocument(repair);
+      else repair();
+      if (saved) {
+        restoreRange(this.element, range, saved);
+        restoreSquireSelection(this._squire, range);
+        this.savedSelection = cloneRange(range);
+      }
+    }
     runControl(def) {
       if (!this._squire || typeof def.run !== "function") return;
       this.restoreSelection();
       const result = def.run(this);
+      this.ensureRootIsEditable();
+      this.anchorSelectionInBlock();
       this.saveSelection();
       this.toolbar?.update();
       this.updatePlaceholder();
@@ -1407,6 +1630,19 @@ var RichClayBundle = (() => {
       if (result !== KEEP_FOCUS) {
         this.focus();
       }
+    }
+    // Squire's modifyBlocks leaves the caret anchored on the root itself, between
+    // blocks. From there getStartBlockOfRange finds no block, so the next block
+    // command is a silent no-op — the "it stopped working" the user hit. Push a
+    // collapsed caret back inside the block it is sitting in front of.
+    anchorSelectionInBlock() {
+      const range = getSquireSelection(this._squire);
+      if (!range?.collapsed || range.startContainer !== this.element) return;
+      const child = this.element.childNodes[range.startOffset] || this.element.lastChild;
+      if (!child) return;
+      range.setStart(firstCaretPosition(child), 0);
+      range.collapse(true);
+      restoreSquireSelection(this._squire, range);
     }
     selectionHasFormat(tag) {
       if (!tag || !this._squire?.hasFormat) return false;
@@ -1717,13 +1953,43 @@ var RichClayBundle = (() => {
         if (def.type === "menu" || def.type === "separator") return;
         if (!def.shortcut || !def.id || seen.has(def.id)) return;
         seen.add(def.id);
-        shortcutKeys(def.shortcut).forEach((key) => {
-          this._squire.setKeyHandler(key, (squire, event) => {
-            event.preventDefault();
-            this.runControl(def);
-          });
-          this._shortcutKeys.push(key);
+        const key = shortcutKey(def.shortcut, this.window);
+        this._squire.setKeyHandler(key, (squire, event) => {
+          event.preventDefault();
+          this.runControl(def);
         });
+        this._shortcutKeys.push(key);
+      });
+    }
+    // macOS sends Ctrl+D and Ctrl+H to the browser's own forward/backward delete,
+    // which merges two blocks by wrapping the moved text in a computed-style
+    // <span> — permanent junk in an editor whose DOM is the saved document. Point
+    // them at Squire's own handlers so they behave exactly like Delete and
+    // Backspace. Reads Squire's key handler table; no-ops for other engines.
+    // Squire binds Code to the platform modifier itself, on _keyHandlers' prototype,
+    // so dropping richclay's own shortcut is not enough to retire it. An own
+    // property of null shadows the inherited handler and the key falls through.
+    maskSquireCodeShortcut() {
+      const key = `${isApplePlatform(this.window) ? "Meta" : "Ctrl"}-d`;
+      this._squire.setKeyHandler(key, null);
+      this._shortcutKeys.push(key);
+    }
+    // Squire's toggleCode() makes a block <pre> when the selection is collapsed,
+    // which inside a single-line region means a code block in the middle of a
+    // heading. Those regions get inline <code> instead.
+    toggleCode() {
+      if (!this.options.singleLine) return this._squire.toggleCode();
+      if (this.selectionHasFormat("CODE")) return this._squire.changeFormat(null, { tag: "CODE" });
+      return this._squire.changeFormat({ tag: "CODE" }, null);
+    }
+    installAppleDeleteKeys() {
+      if (!isApplePlatform(this.window)) return;
+      const handlers = this._squire._keyHandlers;
+      if (!handlers) return;
+      [["Ctrl-d", "Delete"], ["Ctrl-h", "Backspace"]].forEach(([key, native]) => {
+        if (typeof handlers[native] !== "function") return;
+        this._squire.setKeyHandler(key, handlers[native]);
+        this._shortcutKeys.push(key);
       });
     }
     installSingleLineGuards() {
@@ -1786,17 +2052,21 @@ var RichClayBundle = (() => {
       throw new Error(`RichClay button "${def.id}" requires a run(editor) function.`);
     }
   }
-  function shortcutKeys(shortcut) {
+  function shortcutKey(shortcut, win) {
     const parts = shortcut.split("+");
-    const hasMod = parts.includes("Mod");
-    const modifiers = parts.filter((part) => part !== "Mod");
-    const key = modifiers.pop();
-    const hasShift = modifiers.includes("Shift");
-    const normalizedKey = key.length === 1 ? hasShift ? key.toUpperCase() : key.toLowerCase() : key;
-    const prefix = modifiers.map(normalizeModifier).join("-");
-    const suffix = `${prefix ? `${prefix}-` : ""}${normalizedKey}`;
-    if (!hasMod) return [suffix];
-    return [`Ctrl-${suffix}`, `Meta-${suffix}`];
+    const keyPart = parts[parts.length - 1];
+    const modifiers = new Set(parts.slice(0, -1).map(normalizeModifier));
+    if (modifiers.delete("Mod")) modifiers.add(isApplePlatform(win) ? "Meta" : "Ctrl");
+    const key = keyPart.length === 1 ? modifiers.has("Shift") ? keyPart.toUpperCase() : keyPart.toLowerCase() : keyPart;
+    const prefix = MODIFIER_ORDER.filter((modifier) => modifiers.has(modifier)).join("-");
+    return `${prefix ? `${prefix}-` : ""}${key}`;
+  }
+  function firstCaretPosition(node) {
+    let current = node;
+    while (current.firstChild && !LEAF_NODE_NAMES.has(current.firstChild.nodeName)) {
+      current = current.firstChild;
+    }
+    return current;
   }
   function normalizeModifier(modifier) {
     return modifier === "Cmd" ? "Meta" : modifier;
@@ -2112,15 +2382,22 @@ var RichClayBundle = (() => {
    \`width: 0; min-width: 100%\` zeroes the pre's intrinsic-width contribution so a
    long unbreakable line can't push an intrinsically-sized ancestor (flex/grid
    item, inline-block, table cell) wider, while still filling the editor and
-   scrolling its own overflow. box-sizing keeps padding inside that 100%. */
-.richclay-editor pre {
-  background: var(--richclay-surface-alt);
-  border-radius: 4px;
+   scrolling its own overflow. box-sizing keeps padding inside that 100%.
+   Containment applies to inline editors too: \`white-space: pre\` never wraps, so
+   without it one code block runs off the side of the page. Only the decoration
+   below stays card-scoped, since inline mode keeps the page's own typography. */
+.richclay-editor pre,
+.richclay-inline pre {
   box-sizing: border-box;
   min-width: 100%;
   overflow: auto;
-  padding: 10px;
   width: 0;
+}
+
+.richclay-editor pre {
+  background: var(--richclay-surface-alt);
+  border-radius: 4px;
+  padding: 10px;
 }
 
 .richclay-dialog {

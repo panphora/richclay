@@ -69,11 +69,18 @@ export function createDefaultRegistry() {
   return new Map(defaultButtons.map(button => [button.id, button]));
 }
 
-export function formatShortcut(shortcut) {
+// Squire binds Meta on Apple platforms and Ctrl everywhere else (its `ctrlKey`,
+// source/keyboard/KeyHandlers.ts). richclay has to agree, or a shortcut label
+// and the key that actually fires it drift apart.
+export function isApplePlatform(win = globalThis) {
+  const nav = win?.navigator;
+  if (!nav) return false;
+  return /Mac|iPhone|iPad|iPod/.test(nav.platform || nav.userAgent || "");
+}
+
+export function formatShortcut(shortcut, win = globalThis) {
   if (!shortcut) return "";
-  const platform = globalThis.navigator?.platform || "";
-  const mod = /Mac|iPhone|iPad|iPod/.test(platform) ? "Cmd" : "Ctrl";
-  return shortcut.replace("Mod", mod);
+  return shortcut.replace("Mod", isApplePlatform(win) ? "Cmd" : "Ctrl");
 }
 
 export const defaultButtons = [
@@ -87,7 +94,10 @@ export const defaultButtons = [
   toggle("strikethrough", "Strikethrough", icons.strike, "Mod+Shift+7", "inline", editor =>
     editor.toggleFormat("S", "strikethrough", "removeStrikethrough")
   ),
-  toggle("code", "Code", icons.code, "Mod+D", "inline", editor => editor.squire.toggleCode(), editor =>
+  // No shortcut. One keystroke turning a paragraph of prose into a code block is
+  // a sharp edge in an editor whose DOM is the saved file, and Mod+D also shadows
+  // the browser's own bookmark shortcut. The toolbar button stays.
+  toggle("code", "Code", icons.code, null, "inline", editor => editor.toggleCode(), editor =>
     editor.selectionHasFormat("CODE") || editor.selectionHasFormat("PRE")
   ),
   {

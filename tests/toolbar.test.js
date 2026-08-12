@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { setupDom, FakeSquire } from "./helpers.js";
+import { setupDom, FakeSquire, setPlatform } from "./helpers.js";
 import RichClay from "../src/richclay.js";
 
 test("toolbar command calls Squire and reflects aria-pressed", () => {
@@ -162,6 +162,7 @@ test("toolbar:false renders no toolbar and keeps shortcuts active", () => {
 
 test("an inline custom toolbar definition's shortcut is installed", () => {
   setupDom('<!doctype html><html><body><div data-richclay><p>x</p></div></body></html>');
+  setPlatform(window, "Win32");
   const editor = new RichClay(document.querySelector("[data-richclay]"), {
     Squire: FakeSquire,
     toolbar: ["bold", { id: "zap", label: "Zap", shortcut: "Mod+E", run: () => {} }]
@@ -170,5 +171,4 @@ test("an inline custom toolbar definition's shortcut is installed", () => {
     .filter(c => Array.isArray(c) && c[0] === "shortcut")
     .map(c => c[1]);
   assert.equal(keys.includes("Ctrl-e"), true);
-  assert.equal(keys.includes("Meta-e"), true);
 });

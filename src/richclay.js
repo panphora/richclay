@@ -1,7 +1,14 @@
 import {
   createDefaultRegistry,
+  isApplePlatform,
   presets
 } from "./buttons.js";
+import {
+  captureRange,
+  editorRootNeedsNormalization,
+  normalizeEditorRoot,
+  restoreRange
+} from "./normalize.js";
 import { Toolbar } from "./toolbar.js";
 import { FloatingToolbar } from "./toolbar-float.js";
 import {
@@ -40,6 +47,10 @@ const autoInitWindows = new WeakSet();
 const watchedWindows = new WeakSet();
 const globalRegistry = createDefaultRegistry();
 const KEEP_FOCUS = Symbol("richclay-keep-focus");
+const BLOCK_TAG = "P";
+const ROOT_TRANSFER_EVENTS = ["cut", "paste", "drop"];
+const MODIFIER_ORDER = ["Alt", "Ctrl", "Meta", "Shift"];
+const LEAF_NODE_NAMES = new Set(["BR", "HR", "IFRAME", "IMG", "INPUT"]);
 let dialogSeq = 0;
 
 const defaultOptions = {
@@ -86,6 +97,9 @@ export default class RichClay {
     this._squire = null;
     this._squireListeners = [];
     this._onBeforeInput = null;
+    this._onRootBeforeInput = null;
+    this._onRootKeydown = null;
+    this._onRootTransfer = null;
     this._shortcutKeys = [];
     this._onFocus = () => {
       this.element.classList.add("richclay-focused");
@@ -225,7 +239,11 @@ export default class RichClay {
     ensureStyles(this.element.ownerDocument);
     consumeInertContenteditable(this.element);
 
-    const initialHTML = this.element.innerHTML;
+    // Captured before Squire's constructor wipes the root. Inline mode keeps the
+    // live nodes rather than a serialized string, so activation cannot lose
+    // anything an innerHTML round trip would drop (form state, node identity).
+    const initialNodes = this.options.inline ? Array.from(this.element.childNodes) : null;
+    const initialHTML = this.options.inline ? null : this.element.innerHTML;
     const Squire = this.options.Squire || this.window.Squire || globalThis.Squire;
     if (!Squire) {
       throw new Error("RichClay requires Squire. Load vendor/squire.js before richclay.js.");
@@ -235,7 +253,7 @@ export default class RichClay {
     this.liveRegion = createLiveRegion(this.element.ownerDocument);
 
     this._squire = new Squire(this.element, {
-      blockTag: "P",
+      blockTag: BLOCK_TAG,
       sanitizeToDOMFragment: (html, editor) => {
         const fragment = this.sanitizer.sanitizeToDOMFragment(html, editor);
         return this.options.singleLine ? flattenFragmentToSingleLine(fragment) : fragment;
@@ -246,9 +264,14 @@ export default class RichClay {
     });
     if (this.options.inline) {
       // Fidelity-first: Squire's constructor wiped the root; put the captured
-      // markup back verbatim. Running it through setHTML would sanitize and
+      // nodes back verbatim. Running them through setHTML would sanitize and
       // re-wrap the page's own content into blocks on mere activation.
-      this.element.innerHTML = initialHTML;
+      //
+      // The structural repair Squire needs is deliberately NOT done here. Merely
+      // opening a page in edit mode must leave it byte-identical, or a Hyperclay
+      // page with autosave on writes itself to disk for being looked at. It runs
+      // on the first real edit instead — see ensureRootIsEditable.
+      this.element.replaceChildren(...initialNodes);
       this.resetSquireUndoBaseline();
     } else {
       this._squire.setHTML(initialHTML);
@@ -256,6 +279,10 @@ export default class RichClay {
 
     this.bindSquire();
     if (this.options.singleLine) this.installSingleLineGuards();
+    if (this.options.inline && !this.options.singleLine) this.installRootGuards();
+    // Before installShortcuts, so an explicitly declared Ctrl+ shortcut wins.
+    this.installAppleDeleteKeys();
+    this.maskSquireCodeShortcut();
     this.installShortcuts();
     if (this.options.inline) {
       this._onToolbarKey = event => {
@@ -323,6 +350,20 @@ export default class RichClay {
       this._onBeforeInput = null;
     }
 
+    const doc = this.element.ownerDocument;
+    if (this._onRootBeforeInput) {
+      doc.removeEventListener("beforeinput", this._onRootBeforeInput, true);
+      this._onRootBeforeInput = null;
+    }
+    if (this._onRootKeydown) {
+      doc.removeEventListener("keydown", this._onRootKeydown, true);
+      this._onRootKeydown = null;
+    }
+    if (this._onRootTransfer) {
+      ROOT_TRANSFER_EVENTS.forEach(type => doc.removeEventListener(type, this._onRootTransfer, true));
+      this._onRootTransfer = null;
+    }
+
     this._squire?.destroy?.();
     this._squire = null;
     this.cleanupEditorAttributes();
@@ -339,10 +380,83 @@ export default class RichClay {
     return restoreSquireSelection(this._squire, this.savedSelection);
   }
 
+  // Squire's invariant is established on the first real edit rather than at
+  // activation, so that opening a page in edit mode never rewrites it. These
+  // listeners capture on the document, so the root is valid before Squire's own
+  // handlers see the event. History inputs are skipped: repairing mid-undo would
+  // fight the stack it is replaying.
+  installRootGuards() {
+    const doc = this.element.ownerDocument;
+    const owns = event => this.element.contains(event.target);
+
+    this._onRootBeforeInput = event => {
+      if (!owns(event) || /^history/.test(event.inputType || "")) return;
+      this.ensureRootIsEditable();
+    };
+    this._onRootKeydown = event => {
+      if (!owns(event) || event.defaultPrevented || event.isComposing) return;
+      const types = event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey;
+      if (types || ["Backspace", "Delete", "Enter", "Tab"].includes(event.key)) {
+        this.ensureRootIsEditable();
+      }
+    };
+    this._onRootTransfer = event => {
+      if (owns(event)) this.ensureRootIsEditable();
+    };
+
+    doc.addEventListener("beforeinput", this._onRootBeforeInput, true);
+    doc.addEventListener("keydown", this._onRootKeydown, true);
+    ROOT_TRANSFER_EVENTS.forEach(type => {
+      doc.addEventListener(type, this._onRootTransfer, true);
+    });
+  }
+
+  // Re-checked rather than latched, because Hyperclay's live sync morphs new DOM
+  // into the region long after activation and can reintroduce a loose text node.
+  ensureRootIsEditable() {
+    if (!this._squire || this.options.singleLine) return;
+    const wrapBareRoot = this.options.inline;
+    if (!editorRootNeedsNormalization(this.element, { wrapBareRoot })) return;
+
+    const range = getSquireSelection(this._squire);
+    const saved = range ? captureRange(this.element, range) : null;
+    const repair = () => {
+      normalizeEditorRoot(this.element, {
+        blockTag: BLOCK_TAG,
+        wrapBareRoot,
+        onBareRootWrapped: (root, wrapper) => {
+          console.warn(
+            "richclay: wrapped this region's loose text in a <div> so multi-line editing " +
+              "works. Wrap the content in your own block element to keep the markup you wrote, " +
+              'or use editable="single-line" if it is meant to be one line.',
+            root,
+            wrapper
+          );
+        }
+      });
+    };
+
+    // Through modifyDocument so the repair lands in Squire's undo history rather
+    // than behind the user's back.
+    if (typeof this._squire.modifyDocument === "function") this._squire.modifyDocument(repair);
+    else repair();
+
+    if (saved) {
+      restoreRange(this.element, range, saved);
+      restoreSquireSelection(this._squire, range);
+      this.savedSelection = cloneRange(range);
+    }
+  }
+
   runControl(def) {
     if (!this._squire || typeof def.run !== "function") return;
     this.restoreSelection();
     const result = def.run(this);
+    // Block commands can leave inline content sitting directly on the root:
+    // Squire's removeCode() splices an emptied <pre> out that way, and a caret
+    // parked on the orphan makes every later block command a silent no-op.
+    this.ensureRootIsEditable();
+    this.anchorSelectionInBlock();
     this.saveSelection();
     this.toolbar?.update();
     this.updatePlaceholder();
@@ -351,6 +465,21 @@ export default class RichClay {
     if (result !== KEEP_FOCUS) {
       this.focus();
     }
+  }
+
+  // Squire's modifyBlocks leaves the caret anchored on the root itself, between
+  // blocks. From there getStartBlockOfRange finds no block, so the next block
+  // command is a silent no-op — the "it stopped working" the user hit. Push a
+  // collapsed caret back inside the block it is sitting in front of.
+  anchorSelectionInBlock() {
+    const range = getSquireSelection(this._squire);
+    if (!range?.collapsed || range.startContainer !== this.element) return;
+
+    const child = this.element.childNodes[range.startOffset] || this.element.lastChild;
+    if (!child) return;
+    range.setStart(firstCaretPosition(child), 0);
+    range.collapse(true);
+    restoreSquireSelection(this._squire, range);
   }
 
   selectionHasFormat(tag) {
@@ -730,13 +859,47 @@ export default class RichClay {
       if (def.type === "menu" || def.type === "separator") return;
       if (!def.shortcut || !def.id || seen.has(def.id)) return;
       seen.add(def.id);
-      shortcutKeys(def.shortcut).forEach(key => {
-        this._squire.setKeyHandler(key, (squire, event) => {
-          event.preventDefault();
-          this.runControl(def);
-        });
-        this._shortcutKeys.push(key);
+      const key = shortcutKey(def.shortcut, this.window);
+      this._squire.setKeyHandler(key, (squire, event) => {
+        event.preventDefault();
+        this.runControl(def);
       });
+      this._shortcutKeys.push(key);
+    });
+  }
+
+  // macOS sends Ctrl+D and Ctrl+H to the browser's own forward/backward delete,
+  // which merges two blocks by wrapping the moved text in a computed-style
+  // <span> — permanent junk in an editor whose DOM is the saved document. Point
+  // them at Squire's own handlers so they behave exactly like Delete and
+  // Backspace. Reads Squire's key handler table; no-ops for other engines.
+  // Squire binds Code to the platform modifier itself, on _keyHandlers' prototype,
+  // so dropping richclay's own shortcut is not enough to retire it. An own
+  // property of null shadows the inherited handler and the key falls through.
+  maskSquireCodeShortcut() {
+    const key = `${isApplePlatform(this.window) ? "Meta" : "Ctrl"}-d`;
+    this._squire.setKeyHandler(key, null);
+    this._shortcutKeys.push(key);
+  }
+
+  // Squire's toggleCode() makes a block <pre> when the selection is collapsed,
+  // which inside a single-line region means a code block in the middle of a
+  // heading. Those regions get inline <code> instead.
+  toggleCode() {
+    if (!this.options.singleLine) return this._squire.toggleCode();
+    if (this.selectionHasFormat("CODE")) return this._squire.changeFormat(null, { tag: "CODE" });
+    return this._squire.changeFormat({ tag: "CODE" }, null);
+  }
+
+  installAppleDeleteKeys() {
+    if (!isApplePlatform(this.window)) return;
+    const handlers = this._squire._keyHandlers;
+    if (!handlers) return;
+
+    [["Ctrl-d", "Delete"], ["Ctrl-h", "Backspace"]].forEach(([key, native]) => {
+      if (typeof handlers[native] !== "function") return;
+      this._squire.setKeyHandler(key, handlers[native]);
+      this._shortcutKeys.push(key);
     });
   }
 
@@ -811,17 +974,34 @@ function validateButton(def) {
   }
 }
 
-function shortcutKeys(shortcut) {
+// Squire looks a handler up by "Alt-Ctrl-Meta-Shift-<key>", in that order, and
+// binds Mod to Meta on Apple platforms and to Ctrl elsewhere. richclay used to
+// bind both, which on macOS swallowed the Emacs bindings every text field has:
+// Ctrl+D (delete forward), Ctrl+K (kill line), Ctrl+B, Ctrl+U, Ctrl+I.
+function shortcutKey(shortcut, win) {
   const parts = shortcut.split("+");
-  const hasMod = parts.includes("Mod");
-  const modifiers = parts.filter(part => part !== "Mod");
-  const key = modifiers.pop();
-  const hasShift = modifiers.includes("Shift");
-  const normalizedKey = key.length === 1 ? (hasShift ? key.toUpperCase() : key.toLowerCase()) : key;
-  const prefix = modifiers.map(normalizeModifier).join("-");
-  const suffix = `${prefix ? `${prefix}-` : ""}${normalizedKey}`;
-  if (!hasMod) return [suffix];
-  return [`Ctrl-${suffix}`, `Meta-${suffix}`];
+  const keyPart = parts[parts.length - 1];
+  const modifiers = new Set(parts.slice(0, -1).map(normalizeModifier));
+  if (modifiers.delete("Mod")) modifiers.add(isApplePlatform(win) ? "Meta" : "Ctrl");
+
+  const key =
+    keyPart.length === 1
+      ? modifiers.has("Shift")
+        ? keyPart.toUpperCase()
+        : keyPart.toLowerCase()
+      : keyPart;
+  const prefix = MODIFIER_ORDER.filter(modifier => modifiers.has(modifier)).join("-");
+  return `${prefix ? `${prefix}-` : ""}${key}`;
+}
+
+// Descends to the node a caret should actually live in: the first text node, or
+// the block itself when the block only holds a leaf like the placeholder <br>.
+function firstCaretPosition(node) {
+  let current = node;
+  while (current.firstChild && !LEAF_NODE_NAMES.has(current.firstChild.nodeName)) {
+    current = current.firstChild;
+  }
+  return current;
 }
 
 function normalizeModifier(modifier) {

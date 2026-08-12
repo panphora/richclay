@@ -351,7 +351,7 @@ function createToolbarButton(doc, def) {
   const button = doc.createElement("button");
   button.type = "button";
   button.className = "richclay-button";
-  const shortcut = formatShortcut(def.shortcut);
+  const shortcut = formatShortcut(def.shortcut, doc.defaultView);
   const label = shortcut ? `${def.ariaLabel || def.label} (${shortcut})` : def.ariaLabel || def.label;
   button.setAttribute("aria-label", label);
   button.title = label;

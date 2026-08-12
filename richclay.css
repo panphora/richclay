@@ -291,15 +291,22 @@
    `width: 0; min-width: 100%` zeroes the pre's intrinsic-width contribution so a
    long unbreakable line can't push an intrinsically-sized ancestor (flex/grid
    item, inline-block, table cell) wider, while still filling the editor and
-   scrolling its own overflow. box-sizing keeps padding inside that 100%. */
-.richclay-editor pre {
-  background: var(--richclay-surface-alt);
-  border-radius: 4px;
+   scrolling its own overflow. box-sizing keeps padding inside that 100%.
+   Containment applies to inline editors too: `white-space: pre` never wraps, so
+   without it one code block runs off the side of the page. Only the decoration
+   below stays card-scoped, since inline mode keeps the page's own typography. */
+.richclay-editor pre,
+.richclay-inline pre {
   box-sizing: border-box;
   min-width: 100%;
   overflow: auto;
-  padding: 10px;
   width: 0;
+}
+
+.richclay-editor pre {
+  background: var(--richclay-surface-alt);
+  border-radius: 4px;
+  padding: 10px;
 }
 
 .richclay-dialog {
