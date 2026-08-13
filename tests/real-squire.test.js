@@ -85,6 +85,246 @@ const blankBlocks = element =>
     .filter(child => !/\S/.test(child.textContent))
     .map(child => child.outerHTML);
 
+const selectAll = (editor, element) => {
+  const range = element.ownerDocument.createRange();
+  range.selectNodeContents(element);
+  editor.squire.setSelection(range);
+  editor.saveSelection();
+  return range;
+};
+
+const selectText = (editor, node, start, end) => {
+  const range = node.ownerDocument.createRange();
+  range.setStart(node, start);
+  range.setEnd(node, end);
+  editor.squire.setSelection(range);
+  editor.saveSelection();
+  return range;
+};
+
+// Unpatched, one click of Clear formatting on a <span editable> walked out of the
+// region, moved every character into the author's page, and left two empty copies
+// of the region behind.
+test("clear formatting keeps the content inside an inline region", () => {
+  ["span", "b", "a"].forEach(tag => {
+    const attrs = tag === "a" ? ' href="/x"' : "";
+    const markup = `<div id="host">Lead <${tag}${attrs} editable id="r">Hello world</${tag}> tail</div>`;
+    const { element, editor } = mountMarkup(markup);
+    selectAll(editor, element);
+
+    editor.runControl(editor.registry.get("clearFormatting"));
+
+    const host = document.getElementById("host");
+    assert.equal(host.querySelectorAll("[editable]").length, 1, tag);
+    assert.equal(document.getElementById("r").textContent, "Hello world", tag);
+    assert.equal(host.textContent, "Lead Hello world tail", tag);
+    assert.equal(savedRegion(element).outerHTML, `<${tag}${attrs} editable="" id="r">Hello world</${tag}>`, tag);
+  });
+});
+
+// Unpatched, the walk climbed past the region into the author's own <a> and
+// deleted a link the region only happened to sit inside.
+test("unlink inside an author's <a> leaves that <a> alone", () => {
+  const { element, editor } = mountMarkup(
+    '<div id="host"><a href="/keep">Lead <span editable>Hello world</span> tail</a></div>'
+  );
+  selectAll(editor, element);
+
+  editor.runControl(editor.registry.get("unlink"));
+
+  assert.equal(document.querySelectorAll('a[href="/keep"]').length, 1);
+  assert.equal(Boolean(element.closest('a[href="/keep"]')), true);
+  assert.equal(document.getElementById("host").textContent, "Lead Hello world tail");
+});
+
+// Unpatched, removeEmptyInlines walked up past the root and deleted the region
+// element itself, so one Select All plus Backspace removed the region from the
+// author's page. <div> and <p> are the controls: a block root always survived.
+test("select all then Backspace leaves the region element in place", () => {
+  [
+    ["span", ""],
+    ["b", ""],
+    ["em", ""],
+    ["code", ""],
+    ["a", ' href="/x"'],
+    ["span", ' editable="single-line"'],
+    ["div", ""],
+    ["p", ""]
+  ].forEach(([tag, attrs]) => {
+    const editable = attrs.includes("editable") ? attrs : `${attrs} editable`;
+    const label = `${tag}${attrs}`;
+    const { element, editor } = mountMarkup(
+      `<div id="host">Lead <${tag}${editable} id="r">Hello world</${tag}> tail</div>`
+    );
+    selectAll(editor, element);
+
+    press(element, "Backspace");
+
+    assert.equal(Boolean(document.getElementById("r")), true, label);
+    assert.equal(document.getElementById("r"), element, label);
+  });
+});
+
+// The guards must stop the walk at the root without disabling the walk: ordinary
+// formatting still has to reach the selection.
+test("bold, italic and link still work on an inline root", () => {
+  const { element, editor } = mountMarkup('<div id="host">Lead <span editable>Hello world</span> tail</div>');
+  selectText(editor, element.firstChild, 0, 5);
+  editor.runControl(editor.registry.get("bold"));
+
+  const bold = element.querySelector("b");
+  assert.equal(bold.textContent, "Hello");
+
+  selectAll(editor, bold);
+  editor.runControl(editor.registry.get("italic"));
+  assert.equal(element.querySelector("b > i").textContent, "Hello");
+
+  selectAll(editor, element.querySelector("i"));
+  editor.squire.makeLink("https://example.com/");
+
+  assert.equal(element.querySelector("a").getAttribute("href"), "https://example.com/");
+  assert.equal(document.getElementById("host").textContent, "Lead Hello world tail");
+  assert.equal(
+    savedRegion(element).innerHTML,
+    '<b><i><a href="https://example.com/">Hello</a></i></b> world'
+  );
+});
+
+// opus-a reported that applying a new link over part of an <a editable> splits the
+// region into two elements carrying the same id. It does not split, but it nests an
+// <a> in an <a>, which the parser takes apart on the next load. Two answers: the
+// control is disabled, and if one arrives another way the save strip unwraps it.
+test("the link control is disabled inside a link, and a nested <a> is repaired anyway", () => {
+  const { element, editor } = mountMarkup('<div id="host"><a href="/one" editable id="r">Hello world</a></div>');
+  assert.equal(editor.registry.get("link").isDisabled(editor), true);
+  assert.equal(editor.registry.get("unlink").isDisabled, undefined);
+
+  const before = element.innerHTML;
+  selectText(editor, element.firstChild, 0, 5);
+  editor.runControl(editor.registry.get("link"));
+  assert.equal(element.innerHTML, before);
+  assert.equal(document.querySelector("[data-richclay-dialog]"), null);
+
+  // and the repair, for a nested <a> that arrives by any other route
+  editor.squire.makeLink("https://example.com/two");
+  const saved = savedRegion(element);
+  assert.equal(document.querySelectorAll("#r").length, 1);
+  assert.equal(saved.querySelectorAll("a").length, 0);
+  assert.equal(reparse(saved).querySelector("[editable]").textContent, "Hello world");
+});
+
+// The control stays available on a region that merely contains links, and on one
+// that is not a link at all. Only being inside an <a> turns it off.
+test("the link control is still offered outside a link", () => {
+  const plain = mountMarkup('<div id="host">Lead <span editable>Hello world</span> tail</div>');
+  assert.equal(plain.editor.registry.get("link").isDisabled(plain.editor), false);
+
+  const holdsLink = mountMarkup('<div editable><p>Hello <a href="/x">world</a></p></div>');
+  assert.equal(holdsLink.editor.registry.get("link").isDisabled(holdsLink.editor), false);
+});
+
+// An author's <li> is a line of text they wrote, so it keeps that shape and gets no
+// warning for being ordinary HTML.
+test("<li editable> keeps the shape the author wrote through a first edit", () => {
+  const { element, editor } = mountMarkup("<ul><li editable>Item one</li></ul>");
+
+  const warnings = captureWarnings(() => {
+    caretAt(editor, element.firstChild, 4);
+    type(editor, element.firstChild, 4, "x");
+  });
+
+  assert.deepEqual(warnings, []);
+  const saved = savedRegion(element);
+  assert.equal(saved.innerHTML, "Itemx one");
+  assert.equal(saved.querySelectorAll("div").length, 0);
+});
+
+// Squire acts on Tab only inside a list, so treating it as an editing key made
+// merely tabbing out of a fresh region run the repair and strip the author's
+// source indentation, which on an autosaving page writes the file.
+test("Tab outside a list leaves a fresh region byte-identical, and still indents inside one", () => {
+  const { element, editor } = mount();
+  caretAt(editor, element.querySelector("p").firstChild, 1);
+  press(element, "Tab");
+  assert.equal(element.innerHTML, SOURCE);
+
+  // Inside a list Tab does edit, so it still has to repair the root first: the
+  // indent runs against a root Squire's own handlers can work on.
+  const list = mount("\n  <p>Lead</p>\n  <ul>\n    <li>One</li>\n    <li>Two</li>\n  </ul>\n");
+  const items = list.element.querySelectorAll("li");
+  caretAt(list.editor, items[1].firstChild, 0);
+  assert.equal(list.editor.caretIsInList(), true);
+  press(list.element, "Tab");
+
+  assert.equal(list.element.querySelectorAll("ul ul li").length, 1);
+  assert.equal(editorRootNeedsNormalization(list.element, { wrapBareRoot: true }), false);
+  assert.equal(list.element.innerHTML, "<p>Lead</p><ul><li>One</li><ul><li>Two</li></ul></ul>");
+});
+
+// Four inline styles including width: 0 written into an author's file for merely
+// opening it is the byte-identical-on-open invariant broken. The <pre> richclay
+// makes is richclay's to contain.
+test("only a <pre> richclay created gets the containment style", () => {
+  const authored = mountMarkup("<pre editable>one\n  two</pre>");
+  assert.equal(savedRegion(authored.element).outerHTML, '<pre editable="">one\n  two</pre>');
+
+  const { element, editor } = mountMarkup("<div editable><pre>authored</pre><p>Hello world</p></div>");
+  caretAt(editor, element.querySelector("p").firstChild, 5);
+  editor.runControl(editor.registry.get("code"));
+
+  const [mine, theirs] = Array.from(savedRegion(element).querySelectorAll("pre")).sort((a, b) =>
+    a.hasAttribute("style") ? 1 : -1
+  );
+  assert.equal(mine.hasAttribute("style"), false);
+  assert.equal(mine.textContent, "authored");
+  assert.equal(theirs.style.width, "0px");
+  assert.equal(theirs.style.overflow, "auto");
+  assert.equal(theirs.hasAttribute("data-richclay-pre"), false);
+});
+
+// Squire's paste path runs fixContainer over the pasted fragment, so two plain
+// lines land a block per line in a region the author wrote as one line of text.
+test("a two-line plain-text paste manufactures no block in a single-line region", () => {
+  const { element, editor } = mountMarkup('<h1 editable="single-line">Hello</h1>');
+  caretAt(editor, element.firstChild, 5);
+  editor.squire.insertPlainText("One\nTwo", true);
+
+  const saved = savedRegion(element);
+  assert.equal(saved.innerHTML, "HelloOne Two");
+  assert.equal(saved.querySelectorAll("div").length, 0);
+});
+
+// One block, not one per line. Squire's insertTreeFragmentIntoRange re-wraps after
+// willPaste, so a single wrapper still lands here and no <br> is produced: chasing
+// that means mutating the live DOM after the paste, which is the machinery that
+// caused the caret bugs in rounds 2 and 3, for a wrapper that is cosmetic and
+// stable under a reload. The listener's job is that two lines do not become two
+// blocks, and that a single-line region ends up with no block at all.
+test("a two-line plain-text paste lands one block in an <h2 editable>, not one per line", () => {
+  const { element, editor } = mountMarkup("<div><h2 editable>Hello</h2></div>");
+  caretAt(editor, element.firstChild, 5);
+  editor.squire.insertPlainText("One\nTwo", true);
+
+  const saved = savedRegion(element);
+  assert.equal(saved.querySelectorAll("div").length, 1);
+  assert.equal(saved.textContent, "HelloOneTwo");
+  assert.equal(reparse(saved).querySelector("[editable]").textContent, "HelloOneTwo");
+});
+
+// installShortcuts masks a disabled control's shortcut with an own null rather
+// than skipping it, because not installing richclay's own binding is what leaves
+// Squire's inherited handler in charge of the key.
+test("a disabled control's shortcut is masked, not left to Squire", () => {
+  setupRealSquire("<div editable><p>x</p></div>", "MacIntel");
+  const editor = new RichClay(document.querySelector("[editable]"), {
+    toolbar: [{ id: "zap", label: "Zap", shortcut: "Mod+E", isDisabled: () => true, run: () => {} }]
+  });
+  const handlers = editor.squire._keyHandlers;
+
+  assert.equal(Object.prototype.hasOwnProperty.call(handlers, "Meta-e"), true);
+  assert.equal(handlers["Meta-e"], null);
+});
+
 // The old keydown guard ignored any key with a modifier, which skipped the repair
 // for exactly the two keys installAppleDeleteKeys binds. Plain Delete already
 // repaired, and is the control here.
@@ -179,15 +419,25 @@ test("a block command refuses to run on a phrasing-only root", () => {
 // The round 3 P0. installShortcuts skipped installing a disabled shortcut, and
 // richclay's own binding was the only thing shadowing Squire's inherited Mod+],
 // so the key kept building a <blockquote> in a <p editable>. Both platforms,
-// because the mask only lands if richclay and Squire agree on the prefix.
+// because the mask only lands if richclay and Squire agree on the prefix: the
+// key-table assertion is what catches a harness that puts them on different
+// keyboards, which pressing the key on one platform alone never did.
 test("Mod+] builds nothing in a region a <p> ejects blocks from", () => {
-  [["MacIntel", { metaKey: true }], ["Win32", { ctrlKey: true }]].forEach(([platform, init]) => {
+  [["MacIntel", "Meta-]", { metaKey: true }], ["Win32", "Ctrl-]", { ctrlKey: true }]].forEach(
+    ([platform, key, init]) => {
     ["<p editable>Hello world</p>", "<p>Lead <span editable>Hello world</span> tail</p>"].forEach(
       markup => {
         const label = `${platform} ${markup}`;
         const { element, editor } = mountMarkup(markup, platform);
         const before = element.innerHTML;
         caretAt(editor, element.firstChild, 5);
+
+        // Squire's own binding lives on the prototype at the key its platform
+        // prefix produced; richclay has to shadow that exact key with an own null.
+        const handlers = editor.squire._keyHandlers;
+        assert.equal(typeof Object.getPrototypeOf(handlers)[key], "function", label);
+        assert.equal(Object.prototype.hasOwnProperty.call(handlers, key), true, label);
+        assert.equal(handlers[key], null, label);
 
         press(element, "]", init);
 
@@ -197,7 +447,8 @@ test("Mod+] builds nothing in a region a <p> ejects blocks from", () => {
         assert.equal(reparse(element.closest("p")).childNodes.length, 1, label);
       }
     );
-  });
+    }
+  );
 });
 
 // Nothing rearranges any of these on reload, so the parser is not what decides

@@ -4,6 +4,7 @@ import { setupDom, FakeSquire } from "./helpers.js";
 import RichClay from "../src/richclay.js";
 import {
   stripRichClayFromClone,
+  shouldUseHyperclay,
   isHyperclayEditMode,
   consumeInertContenteditable
 } from "../src/hyperclay.js";
@@ -11,7 +12,7 @@ import {
 test("beforeSave stripping removes chrome and runtime state while preserving content and marker", () => {
   setupDom(`
     <!doctype html><html><body>
-      <div data-richclay class="richclay-editor richclay-active" contenteditable="true" role="textbox" data-richclay-runtime-role="true">
+      <div data-richclay data-richclay-active="true" class="richclay-editor richclay-active" contenteditable="true" role="textbox" data-richclay-runtime-role="true">
         <p>Hello <strong>world</strong></p>
       </div>
       <div data-richclay-toolbar role="toolbar" snapshot-remove>Toolbar</div>
@@ -37,7 +38,7 @@ test("save-strip removes zero-width caret artifacts and empties Squire left behi
   const zwsp = String.fromCharCode(0x200b);
   setupDom(`
     <!doctype html><html><body>
-      <div data-richclay contenteditable="true">
+      <div data-richclay data-richclay-active="true" contenteditable="true">
         <p>Hello${zwsp} <strong>world</strong></p>
         <p><em></em>Tail</p>
       </div>
@@ -188,6 +189,51 @@ test("isHyperclayEditMode resolves the edit-mode signal in priority order", () =
   assert.equal(isHyperclayEditMode({ location: { search: "" }, document: { cookie: "" } }), false);
 });
 
+// clayjs is the second client. It publishes window.clay and calls the save transform
+// addDocumentTransform, so a resolver that only knows window.hyperclay finds nothing,
+// returns without registering, and richclay writes its own toolbars into every saved
+// file with nothing thrown and nothing logged.
+test("shouldUseHyperclay sees a page carrying only window.clay", () => {
+  assert.equal(shouldUseHyperclay({}, { clay: {}, location: { search: "" }, document: { cookie: "" } }), true);
+});
+
+test("isHyperclayEditMode reads win.clay.isEditMode, and a false there outranks the cookie", () => {
+  assert.equal(
+    isHyperclayEditMode({ location: { search: "" }, clay: { isEditMode: true }, document: { cookie: "" } }),
+    true
+  );
+  assert.equal(
+    isHyperclayEditMode({
+      location: { search: "" },
+      clay: { isEditMode: false },
+      document: { cookie: "isAdminOfCurrentResource=1" }
+    }),
+    false
+  );
+});
+
+test("the bridge registers its strip through win.clay.addDocumentTransform", () => {
+  const callbacks = [];
+  setupDom(
+    '<!doctype html><html><body><div data-richclay><p>x</p></div></body></html>',
+    "https://example.test/?editmode=true"
+  );
+  window.clay = {
+    isEditMode: true,
+    addDocumentTransform(callback) {
+      callbacks.push(callback);
+    }
+  };
+
+  const editor = new RichClay(document.querySelector("[data-richclay]"), {
+    Squire: FakeSquire,
+    toolbar: "minimal"
+  });
+
+  assert.equal(editor.active, true);
+  assert.equal(callbacks.length, 1);
+});
+
 test("hyperclay:false forces standalone activation regardless of view mode", () => {
   setupDom('<!doctype html><html><body><div data-richclay><p>x</p></div></body></html>', "https://example.test/?editmode=false");
   window.hyperclay = { isEditMode: false, beforeSave() {} };
@@ -313,12 +359,109 @@ test("destroy restores the author's original non-true contenteditable value", ()
   assert.equal(element.getAttribute("contenteditable"), "false");
 });
 
+// The premise, measured rather than predicted. Each shape puts MID between AAA and
+// ZZZ, saves, and reloads the saved markup: whatever the parser would take apart
+// has to be flattened on the way out, and whatever it leaves alone has to survive
+// as the author wrote it. Built with DOM APIs so no Squire route is involved.
+const measureShapes = [
+  ["heading in heading", "<div><h2 editable></h2></div>", "h3", true],
+  ["ul in heading", "<div><h2 editable></h2></div>", "ul", false],
+  ["span under p", "<p>lead <span editable></span> tail</p>", "div", true],
+  ["li in li", "<ul><li editable></li></ul>", "li", true],
+  ["div in div", "<div><div editable></div></div>", "div", false],
+  ["p in span in div", "<div><span editable></span></div>", "p", false]
+];
+
+const buildMeasureShape = (shell, tag) => {
+  setupDom(`<!doctype html><html><body>${shell}</body></html>`);
+  const region = document.querySelector("[editable]");
+  region.setAttribute("data-richclay-active", "true");
+  region.appendChild(document.createTextNode("AAA"));
+  const mid = document.createElement(tag);
+  mid.textContent = "MID";
+  region.appendChild(mid);
+  region.appendChild(document.createTextNode("ZZZ"));
+  return region;
+};
+
+const reloadSaved = region => {
+  const clone = region.ownerDocument.documentElement.cloneNode(true);
+  stripRichClayFromClone(clone);
+  const reloaded = region.ownerDocument.implementation.createHTMLDocument("");
+  reloaded.body.innerHTML = clone.querySelector("body").innerHTML;
+  return { saved: clone.querySelector("[editable]"), reloaded: reloaded.querySelector("[editable]") };
+};
+
+test("the save hook measures each shape against the parser instead of predicting it", () => {
+  measureShapes.forEach(([label, shell, tag, flattens]) => {
+    const region = buildMeasureShape(shell, tag);
+    const { saved, reloaded } = reloadSaved(region);
+
+    assert.equal(saved.querySelectorAll(tag).length, flattens ? 0 : 1, label);
+    assert.equal(reloaded.textContent, "AAAMIDZZZ", label);
+  });
+});
+
+// The block ancestor is what reparses, not the region, so depth is irrelevant:
+// three inline wrappers down, the <p> still takes the block apart.
+test("a block below a <p> at depth 3 is still flattened", () => {
+  setupDom(
+    '<!doctype html><html><body><p>lead <em><b><span editable data-richclay-active="true">Hello</span></b></em> tail</p></body></html>'
+  );
+  const region = document.querySelector("[editable]");
+  const block = document.createElement("div");
+  block.textContent = "X";
+  region.appendChild(block);
+
+  const clone = document.documentElement.cloneNode(true);
+  stripRichClayFromClone(clone);
+  assert.equal(clone.querySelector("[editable]").innerHTML, "HelloX");
+});
+
+// The reparse is the expensive half, so a region with nothing to flatten must not
+// pay for it. The measurement stamps the region to find itself again, which is the
+// one observable it cannot do without.
+test("a region with no block descendant never reaches the reparse", () => {
+  setupDom(
+    '<!doctype html><html><body><p>lead <span editable data-richclay-active="true">Hello <b>world</b></span> tail</p></body></html>'
+  );
+  const clone = document.documentElement.cloneNode(true);
+  const region = clone.querySelector("[editable]");
+  const measured = [];
+  const setAttribute = region.setAttribute.bind(region);
+  region.setAttribute = (name, value) => {
+    measured.push(name);
+    setAttribute(name, value);
+  };
+
+  stripRichClayFromClone(clone);
+  assert.equal(measured.includes("data-richclay-measure"), false);
+});
+
+// A promise the author made, not one the parser enforces: a single-line region
+// keeps no block even when the block would reparse exactly where it is.
+test("a single-line region is flattened even when nothing would eject the block", () => {
+  setupDom(
+    '<!doctype html><html><body><div><span editable="single-line" data-richclay-active="true">Hello</span></div></body></html>'
+  );
+  const region = document.querySelector("[editable]");
+  const block = document.createElement("div");
+  block.textContent = "X";
+  region.appendChild(block);
+
+  const clone = document.documentElement.cloneNode(true);
+  stripRichClayFromClone(clone);
+  assert.equal(clone.querySelector("[editable]").innerHTML, "HelloX");
+});
+
 // The save hook is the one place this has to be right: it sits downstream of every
 // Squire route, so whatever leaked into a region a <p> ejects blocks from is
 // flattened before the markup reaches the file. Built with appendChild so the test
 // depends on no Squire route at all.
 test("the save strip flattens a block that leaked into a region under a <p>", () => {
-  setupDom('<!doctype html><html><body><p>Lead <span editable>Hello world</span> tail</p></body></html>');
+  setupDom(
+    '<!doctype html><html><body><p>Lead <span editable data-richclay-active="true">Hello world</span> tail</p></body></html>'
+  );
   const region = document.querySelector("[editable]");
   const block = document.createElement("div");
   block.textContent = "X";
@@ -335,7 +478,9 @@ test("the save strip flattens a block that leaked into a region under a <p>", ()
 // The author's own block, in a region nothing rearranges. Round 3b's whole-root
 // flatten destroyed exactly this.
 test("the save strip leaves a block alone in a region nothing ejects", () => {
-  setupDom('<!doctype html><html><body><div><span editable>Hello world</span></div></body></html>');
+  setupDom(
+    '<!doctype html><html><body><div><span editable data-richclay-active="true">Hello world</span></div></body></html>'
+  );
   const region = document.querySelector("[editable]");
   const block = document.createElement("div");
   block.textContent = "X";
@@ -347,12 +492,14 @@ test("the save strip leaves a block alone in a region nothing ejects", () => {
   assert.equal(clone.querySelector("[editable]").innerHTML, "Hello world<div>X</div>");
 });
 
-// The strip is structural, deliberately not keepsTextShape. Keeping blocks out of
-// a heading is a UX decision the toolbar enforces; a block that is already there
-// is stable, and deleting one a user pasted on purpose would be the hook
-// destroying content.
+// A <div> inside a heading reparses exactly where it was put, so the measurement
+// comes back clean. Keeping blocks out of a heading is a UX decision the toolbar
+// enforces; deleting one a user pasted on purpose would be the hook destroying
+// content.
 test("the save strip leaves a block alone inside an <h2 editable>", () => {
-  setupDom('<!doctype html><html><body><div><h2 editable>Hello world</h2></div></body></html>');
+  setupDom(
+    '<!doctype html><html><body><div><h2 editable data-richclay-active="true">Hello world</h2></div></body></html>'
+  );
   const region = document.querySelector("[editable]");
   const block = document.createElement("div");
   block.textContent = "X";
@@ -362,6 +509,117 @@ test("the save strip leaves a block alone inside an <h2 editable>", () => {
   stripRichClayFromClone(clone);
 
   assert.equal(clone.querySelector("[editable]").innerHTML, "Hello world<div>X</div>");
+});
+
+// An <a> inside an <a> is the same implicitly-closes family as heading in heading,
+// and the parser empties the region on reload. It reaches the measurement through
+// selfNests rather than hasBlockDescendant, because a nested <a> has no block in
+// it, and the unwrap pass repairs what flattenBlocks cannot.
+test("the save strip repairs an <a> nested in an <a editable>", () => {
+  const region = buildMeasureShape('<div><a href="/one" editable></a></div>', "a");
+  const { saved, reloaded } = reloadSaved(region);
+
+  assert.equal(saved.querySelectorAll("a").length, 0);
+  assert.equal(saved.innerHTML, "AAAMIDZZZ");
+  assert.equal(reloaded.textContent, "AAAMIDZZZ");
+});
+
+// The same shape one level down, which is how a paste actually delivers it: the
+// nested <a> is not a child of the region but a grandchild, so the unwrap has to
+// find it by query rather than by walking the region's own children.
+test("the save strip repairs a nested <a> below the region's own children", () => {
+  setupDom(
+    '<!doctype html><html><body><div><a href="/one" editable data-richclay-active="true">Lead </a></div></body></html>'
+  );
+  const region = document.querySelector("[editable]");
+  const wrapper = document.createElement("b");
+  const nested = document.createElement("a");
+  nested.setAttribute("href", "/two");
+  nested.textContent = "inner";
+  wrapper.appendChild(nested);
+  region.appendChild(wrapper);
+  region.appendChild(document.createTextNode(" tail"));
+
+  const clone = document.documentElement.cloneNode(true);
+  stripRichClayFromClone(clone);
+
+  const saved = clone.querySelector("[editable]");
+  assert.equal(saved.querySelectorAll("a").length, 0);
+  assert.equal(saved.innerHTML, "Lead <b>inner</b> tail");
+
+  const reloaded = document.implementation.createHTMLDocument("");
+  reloaded.body.innerHTML = saved.outerHTML;
+  assert.equal(reloaded.querySelector("[editable]").textContent, "Lead inner tail");
+});
+
+// The unwrap must not fire on a region whose own tag appears in it harmlessly: a
+// <div> in a <div editable> reparses exactly where it is, so the measurement comes
+// back clean and nothing is touched.
+test("a region's own tag nested harmlessly inside it is left alone", () => {
+  const region = buildMeasureShape("<div><div editable></div></div>", "div");
+  const { saved } = reloadSaved(region);
+  assert.equal(saved.innerHTML, "AAA<div>MID</div>ZZZ");
+});
+
+// richclay only cleans up after itself. A root it refused, or one it never
+// activated, is the author's markup and comes through the save byte for byte, on
+// the first save and on every save after it.
+test("a region richclay never took ownership of is byte-identical through two saves", () => {
+  [
+    "<table editable><thead><tr><th>One</th></tr></thead><tbody><tr><td>Two</td></tr></tbody></table>",
+    '<svg editable viewBox="0 0 8 8"><text>Label</text></svg>',
+    "<textarea editable>plain</textarea>",
+    "<template editable><p>Hidden</p></template>",
+    "<div editable><p>Never activated</p></div>",
+    // the author's own contenteditable, which removeRuntimeState would otherwise
+    // convert to inert-contenteditable on a region richclay never mounted
+    '<div editable contenteditable="false"><p>Theirs</p></div>',
+    // and their own empty inline wrapper, which the caret-artifact sweep deletes
+    "<div editable><p>Hi <em></em></p></div>"
+  ].forEach(markup => {
+    setupDom(`<!doctype html><html><body>${markup}</body></html>`);
+    const before = document.querySelector("[editable]").outerHTML;
+
+    let source = document.body.innerHTML;
+    for (let pass = 0; pass < 2; pass += 1) {
+      const clone = document.documentElement.cloneNode(true);
+      stripRichClayFromClone(clone);
+      assert.equal(clone.querySelector("[editable]").outerHTML, before, `${markup} pass ${pass}`);
+      setupDom(`<!doctype html><html><body>${source}</body></html>`);
+      source = document.body.innerHTML;
+    }
+  });
+});
+
+// The marker check must not turn the hook off for the regions it is meant to
+// clean: a mounted region still loses every runtime attribute it was given.
+test("a mounted region is still stripped, so the marker check did not disable the hook", () => {
+  setupDom('<!doctype html><html><body><div editable><p>Hi</p></div></body></html>');
+  const element = document.querySelector("[editable]");
+  new RichClay(element, { Squire: FakeSquire });
+  assert.equal(element.getAttribute("data-richclay-active"), "true");
+
+  const clone = document.documentElement.cloneNode(true);
+  stripRichClayFromClone(clone);
+  const saved = clone.querySelector("[editable]");
+  assert.equal(saved.hasAttribute("data-richclay-active"), false);
+  assert.equal(saved.hasAttribute("contenteditable"), false);
+  assert.equal(saved.hasAttribute("class"), false);
+  assert.equal(saved.innerHTML, "<p>Hi</p>");
+});
+
+// Squire leaves its bookmarks wherever the command was operating, which the split
+// cases put above the region, so the per-region sweep never saw them and two
+// <input type="hidden"> elements reached the author's file.
+test("a selection bookmark left outside a region is removed on save", () => {
+  setupDom(
+    '<!doctype html><html><body><div><input id="squire-selection-start" type="hidden">' +
+      '<span editable data-richclay-active="true">Hi</span>' +
+      '<input id="squire-selection-end" type="hidden"></div></body></html>'
+  );
+  const clone = document.documentElement.cloneNode(true);
+  stripRichClayFromClone(clone);
+  assert.equal(clone.querySelectorAll("#squire-selection-start, #squire-selection-end").length, 0);
 });
 
 // A block inside an inline element renders as a run-on, so the box is changed for
@@ -398,50 +656,58 @@ test("an author's own display on an inline region is never touched", () => {
   assert.equal(clone.querySelector("[editable]").style.display, "flex");
 });
 
-// richclay's stylesheet carries save-remove, so the containment a <pre> needs to
-// stop a long line running off the published page has to ride the markup.
-test("save-strip writes the <pre> containment style into the saved markup", () => {
+// richclay's stylesheet carries save-remove, so the containment a <pre> richclay
+// created needs, to stop a long line running off the published page, has to ride
+// the markup. The author's own <pre> is theirs and gets nothing.
+test("save-strip contains the <pre> richclay created and leaves the author's alone", () => {
   setupDom(
-    '<!doctype html><html><body><div data-richclay contenteditable="true"><pre>one</pre><p>x</p><pre>two</pre></div></body></html>'
+    '<!doctype html><html><body><div data-richclay data-richclay-active="true" contenteditable="true"><pre data-richclay-pre>one</pre><p>x</p><pre>two</pre></div></body></html>'
   );
   const clone = document.documentElement.cloneNode(true);
   stripRichClayFromClone(clone);
 
-  const blocks = clone.querySelectorAll("pre");
-  assert.equal(blocks.length, 2);
-  blocks.forEach(pre => {
-    assert.equal(pre.style.boxSizing, "border-box");
-    assert.equal(pre.style.minWidth, "100%");
-    assert.equal(pre.style.overflow, "auto");
-    assert.equal(pre.style.width, "0px");
-  });
+  const [made, authored] = clone.querySelectorAll("pre");
+  assert.equal(made.style.boxSizing, "border-box");
+  assert.equal(made.style.minWidth, "100%");
+  assert.equal(made.style.overflow, "auto");
+  assert.equal(made.style.width, "0px");
+  // the marker is richclay's own bookkeeping and never reaches the file
+  assert.equal(made.hasAttribute("data-richclay-pre"), false);
+  assert.equal(authored.hasAttribute("style"), false);
   // the strip ran on the clone, so the live DOM is untouched
   assert.equal(document.querySelector("pre").hasAttribute("style"), false);
 });
 
-// querySelectorAll never returns the region itself, so a <pre editable> was the
-// one code block the containment missed, and Object.assign overwrote sizing the
-// author had written by hand.
-test("save-strip reaches a root <pre> and leaves the author's own sizing alone", () => {
+// Four inline styles including width: 0 written into an author's file for merely
+// opening it is the byte-identical-on-open invariant broken, so a <pre> the author
+// wrote is left exactly as written, region or not.
+test("an author's own <pre> is byte-identical through a save, as a region or inside one", () => {
+  const markup =
+    '<pre editable data-richclay-active="true" contenteditable="true">code</pre>' +
+    '<div data-richclay data-richclay-active="true" contenteditable="true"><pre>two</pre></div>';
+  setupDom(`<!doctype html><html><body>${markup}</body></html>`);
+  const clone = document.documentElement.cloneNode(true);
+  stripRichClayFromClone(clone);
+
+  assert.equal(clone.querySelector("pre[editable]").hasAttribute("style"), false);
+  assert.equal(clone.querySelector("[data-richclay] pre").hasAttribute("style"), false);
+});
+
+// Only what is missing is supplied, so sizing already on the element wins.
+test("save-strip never overwrites sizing already on a contained <pre>", () => {
   setupDom(
-    '<!doctype html><html><body><pre editable contenteditable="true">code</pre><div data-richclay contenteditable="true"><pre style="width: 50%">two</pre></div></body></html>'
+    '<!doctype html><html><body><div data-richclay data-richclay-active="true" contenteditable="true"><pre data-richclay-pre style="width: 50%">two</pre></div></body></html>'
   );
   const clone = document.documentElement.cloneNode(true);
   stripRichClayFromClone(clone);
 
-  const root = clone.querySelector("pre[editable]");
-  assert.equal(root.style.boxSizing, "border-box");
-  assert.equal(root.style.minWidth, "100%");
-  assert.equal(root.style.overflow, "auto");
-  assert.equal(root.style.width, "0px");
-
-  const authored = clone.querySelector("[data-richclay] pre");
-  assert.equal(authored.style.width, "50%");
-  assert.equal(authored.style.boxSizing, "border-box");
+  const pre = clone.querySelector("pre");
+  assert.equal(pre.style.width, "50%");
+  assert.equal(pre.style.boxSizing, "border-box");
 });
 
 test("save-strip keeps empty inline wrappers that carry attributes", () => {
-  setupDom('<!doctype html><html><body><div data-richclay contenteditable="true"><p><span class="icon"></span>Text<em></em></p></div></body></html>');
+  setupDom('<!doctype html><html><body><div data-richclay data-richclay-active="true" contenteditable="true"><p><span class="icon"></span>Text<em></em></p></div></body></html>');
   const clone = document.documentElement.cloneNode(true);
   stripRichClayFromClone(clone);
   const editor = clone.querySelector("[data-richclay]");

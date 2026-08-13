@@ -1,0 +1,19 @@
+{
+  "package": "squire-rte",
+  "version": "2.4.8",
+  "patches": [
+    "removeAllFormatting-root-guard",
+    "removeFormat-root-guard",
+    "removeEmptyInlines-root-guard"
+  ],
+  "files": {
+    "squire.js": {
+      "upstream": "75c1665d33ec8c1a08dbb5cadae8381acfded4677da44d70cf88a59e4082af20",
+      "vendored": "7325380c9c18ba05296c4158cd45fa6bac2761ab0b4702bc0e9e46c7e9614220"
+    },
+    "squire.mjs": {
+      "upstream": "3132eacfad97dfaa120fa02f46d65d7f8d15e52b7fbe04387d763f20eba90ef2",
+      "vendored": "21c23197dae2ad0bba1e1297cd92cbd536e43048d4001a3647270b1723386d8a"
+    }
+  }
+}

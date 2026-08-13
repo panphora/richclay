@@ -112,7 +112,9 @@ test("editable save round-trip keeps the attribute and leaves no runtime residue
 });
 
 test("save-strip unwraps a lone attribute-less P inside a single-line region", () => {
-  setupDom('<!doctype html><html><body><h1 editable="single-line"><p>Wrapped</p></h1></body></html>');
+  setupDom(
+    '<!doctype html><html><body><h1 editable="single-line" data-richclay-active="true"><p>Wrapped</p></h1></body></html>'
+  );
   const clone = document.documentElement.cloneNode(true);
   stripRichClayFromClone(clone);
   const saved = clone.querySelector("[editable]");

@@ -49,6 +49,7 @@ var RichClayBundle = (() => {
     blocks: svg(`<line ${S} x1="3" x2="15" y1="4" y2="4"/><line ${S} x1="3" x2="15" y1="9" y2="9"/><line ${S} x1="3" x2="10" y1="14" y2="14"/>`)
   };
   var blocksOnly = (editor) => editor.blocksStayOut();
+  var notInsideLink = (editor) => Boolean(editor.element.closest("a"));
   var presets = {
     minimal: ["bold", "italic", "link", "unorderedList"],
     inline: [
@@ -140,6 +141,7 @@ var RichClayBundle = (() => {
       group: "links",
       shortcut: "Mod+K",
       mutates: false,
+      isDisabled: notInsideLink,
       run: (editor) => editor.openLinkDialog(),
       isActive: (editor) => editor.selectionHasFormat("A")
     },
@@ -322,12 +324,64 @@ var RichClayBundle = (() => {
   function ejectsBlocks(root) {
     return Boolean(root.closest?.("p")) || TABLE_STRUCTURE.has(root.nodeName);
   }
-  var TEXT_LINE_ROOTS = /* @__PURE__ */ new Set(["P", "H1", "H2", "H3", "H4", "H5", "H6", "PRE", "LABEL", "LEGEND"]);
+  var TEXT_LINE_ROOTS = /* @__PURE__ */ new Set([
+    "P",
+    "H1",
+    "H2",
+    "H3",
+    "H4",
+    "H5",
+    "H6",
+    "PRE",
+    "LABEL",
+    "LEGEND",
+    "LI",
+    "TD",
+    "TH",
+    "DT",
+    "DD",
+    "FIGCAPTION",
+    "SUMMARY",
+    "CAPTION"
+  ]);
   function keepsTextShape(root) {
     return TEXT_LINE_ROOTS.has(root.nodeName) || isInlineTag(root);
   }
+  var VOID_ROOTS = /* @__PURE__ */ new Set([
+    "AREA",
+    "BASE",
+    "BR",
+    "COL",
+    "EMBED",
+    "HR",
+    "IMG",
+    "INPUT",
+    "LINK",
+    "META",
+    "PARAM",
+    "SOURCE",
+    "TRACK",
+    "WBR"
+  ]);
+  var RAW_TEXT_ROOTS = /* @__PURE__ */ new Set(["SCRIPT", "STYLE", "TEXTAREA", "TITLE", "IFRAME", "NOSCRIPT", "XMP"]);
+  var HTML_NS = "http://www.w3.org/1999/xhtml";
   function isUnsupportedRootTag(root) {
-    return TABLE_STRUCTURE.has(root.nodeName);
+    return TABLE_STRUCTURE.has(root.nodeName) || VOID_ROOTS.has(root.nodeName) || RAW_TEXT_ROOTS.has(root.nodeName) || root.nodeName === "TEMPLATE" || Boolean(root.namespaceURI) && root.namespaceURI !== HTML_NS;
+  }
+  function unsupportedRootReason(root) {
+    if (TABLE_STRUCTURE.has(root.nodeName)) {
+      return "a table element cannot be an editable region. Move the editable attribute to a <td>, a <th>, or an element inside one.";
+    }
+    if (root.namespaceURI && root.namespaceURI !== HTML_NS) {
+      return "an SVG or MathML element cannot be an editable region: an edit puts an HTML block inside it, and the next page load moves that text out of the graphic entirely. Put a <foreignObject> in the SVG and mark an HTML element inside it instead.";
+    }
+    if (VOID_ROOTS.has(root.nodeName)) {
+      return "this element cannot contain anything, so there is nothing to edit. Move the editable attribute to an element that holds text.";
+    }
+    if (root.nodeName === "TEMPLATE") {
+      return "a <template> keeps its content out of the document, so edits to it are never saved.";
+    }
+    return "this element treats its content as plain text, so any edit would be saved as visible markup rather than formatting.";
   }
   function isInlineTag(node) {
     return node.nodeType === ELEMENT_NODE && !FOREIGN_INLINE_ROOTS.has(node.nodeName) && INLINE_NODE_NAMES.test(node.nodeName);
@@ -487,6 +541,17 @@ var RichClayBundle = (() => {
     "richclay-focused"
   ];
   var installedWindows = /* @__PURE__ */ new WeakSet();
+  function hasPlatform(win) {
+    return Boolean(win.clay || win.hyperclay);
+  }
+  function platformEditMode(win) {
+    if (typeof win.clay?.isEditMode === "boolean") return win.clay.isEditMode;
+    if (typeof win.hyperclay?.isEditMode === "boolean") return win.hyperclay.isEditMode;
+    return null;
+  }
+  function platformDocumentTransform(win) {
+    return win.clay?.addDocumentTransform || win.hyperclay?.beforeSave || null;
+  }
   var PRE_CONTAINMENT = {
     boxSizing: "border-box",
     minWidth: "100%",
@@ -496,7 +561,7 @@ var RichClayBundle = (() => {
   function shouldUseHyperclay(options = {}, win = window) {
     if (options.hyperclay === false) return false;
     if (options.hyperclay === true) return true;
-    return Boolean(win.hyperclay || hasEditmodeSignal(win));
+    return Boolean(hasPlatform(win) || hasEditmodeSignal(win));
   }
   function isHyperclayEditMode(win = window) {
     const fromQuery = readEditmodeParam(win);
@@ -504,9 +569,8 @@ var RichClayBundle = (() => {
     if (typeof win.__hyperclayEditMode === "boolean") {
       return win.__hyperclayEditMode;
     }
-    if (typeof win.hyperclay?.isEditMode === "boolean") {
-      return win.hyperclay.isEditMode;
-    }
+    const fromPlatform = platformEditMode(win);
+    if (fromPlatform !== null) return fromPlatform;
     return readEditmodeCookie(win);
   }
   function shouldActivateEditor(options = {}, win = window) {
@@ -529,14 +593,15 @@ var RichClayBundle = (() => {
   }
   function installHyperclayBridge(win = window) {
     if (installedWindows.has(win)) return;
-    const beforeSave = win.hyperclay?.beforeSave;
-    if (typeof beforeSave !== "function") return;
-    beforeSave((docElem) => stripRichClayFromClone(docElem));
+    const addDocumentTransform = platformDocumentTransform(win);
+    if (typeof addDocumentTransform !== "function") return;
+    addDocumentTransform((docElem) => stripRichClayFromClone(docElem));
     installedWindows.add(win);
   }
   function stripRichClayFromClone(docElem) {
     docElem.querySelectorAll?.(CHROME_SELECTOR).forEach((node) => node.remove());
     docElem.querySelectorAll?.(RICHCLAY_SELECTOR).forEach((region) => {
+      if (region.getAttribute("data-richclay-active") !== "true") return;
       removeRuntimeState(region, "save");
       if (needsFlattening(region)) {
         const doc = region.ownerDocument;
@@ -545,6 +610,10 @@ var RichClayBundle = (() => {
           region,
           () => singleLine ? doc.createTextNode(" ") : doc.createElement("br")
         );
+        region.querySelectorAll(region.localName).forEach((nested) => {
+          while (nested.firstChild) nested.parentNode.insertBefore(nested.firstChild, nested);
+          nested.remove();
+        });
       }
       if (region.matches?.('[editable~="single-line"]')) unwrapLoneSingleLineBlock(region);
       region.querySelectorAll("#squire-selection-start, #squire-selection-end").forEach((node) => {
@@ -552,15 +621,33 @@ var RichClayBundle = (() => {
       });
       region.querySelectorAll(".squire-image-resize-container").forEach((node) => node.remove());
       stripZeroWidthArtifacts(region);
-      const codeBlocks = region.matches?.("pre") ? [region, ...region.querySelectorAll("pre")] : Array.from(region.querySelectorAll("pre"));
+      const codeBlocks = (region.matches?.("pre") ? [region, ...region.querySelectorAll("pre")] : Array.from(region.querySelectorAll("pre"))).filter((pre) => pre.hasAttribute("data-richclay-pre"));
       codeBlocks.forEach((pre) => {
         Object.entries(PRE_CONTAINMENT).forEach(([property, value]) => {
           if (!pre.style[property]) pre.style[property] = value;
         });
+        pre.removeAttribute("data-richclay-pre");
       });
     });
+    docElem.querySelectorAll?.("#squire-selection-start, #squire-selection-end").forEach((node) => node.remove());
   }
-  var needsFlattening = (region) => ejectsBlocks(region) || Boolean(region.matches?.('[editable~="single-line"]'));
+  var BLOCK_SCOPE = "p, td, th, li, dl, dt, dd, table, blockquote, div, section, article, aside, main, header, footer, figure, figcaption";
+  var MEASURE_ATTR = "data-richclay-measure";
+  function ejectsOnReload(region) {
+    const doc = region.ownerDocument;
+    const scope = region.closest(BLOCK_SCOPE) || region;
+    region.setAttribute(MEASURE_ATTR, "");
+    const probe = doc.createElement("div");
+    try {
+      probe.innerHTML = scope.outerHTML;
+    } finally {
+      region.removeAttribute(MEASURE_ATTR);
+    }
+    const reparsed = probe.querySelector(`[${MEASURE_ATTR}]`);
+    return !reparsed || reparsed.textContent !== region.textContent;
+  }
+  var selfNests = (region) => Boolean(region.querySelector(region.localName));
+  var needsFlattening = (region) => Boolean(region.matches?.('[editable~="single-line"]')) || (hasBlockDescendant(region) || selfNests(region)) && ejectsOnReload(region);
   function removeRuntimeState(region, mode) {
     const origin = region.getAttribute("data-richclay-runtime-contenteditable");
     if (region.hasAttribute("contenteditable")) {
@@ -590,6 +677,7 @@ var RichClayBundle = (() => {
     removeRuntimeDescribedBy(region);
     region.removeAttribute("data-richclay-active");
     region.removeAttribute("data-richclay-placeholder");
+    region.removeAttribute("data-richclay-pre");
     region.removeAttribute("data-richclay-runtime-role");
     region.removeAttribute("data-richclay-runtime-aria-multiline");
     region.removeAttribute("data-richclay-runtime-no-undo");
@@ -1451,6 +1539,7 @@ var RichClayBundle = (() => {
       this._onRootTransfer = null;
       this._shortcutKeys = [];
       this._appleDeleteKeys = /* @__PURE__ */ new Set();
+      this._authoredPres = /* @__PURE__ */ new WeakSet();
       this._warnedInlineBlock = false;
       this._onFocus = () => {
         this.element.classList.add("richclay-focused");
@@ -1611,9 +1700,23 @@ var RichClayBundle = (() => {
         };
         this.element.addEventListener("keydown", this._onToolbarKey);
       }
+      if (this.blocksStayOut()) {
+        const willPaste = (event) => {
+          const fragment = event.detail?.fragment;
+          if (!fragment) return;
+          const doc = this.element.ownerDocument;
+          flattenBlocks(
+            fragment,
+            () => this.options.singleLine ? doc.createTextNode(" ") : doc.createElement("br")
+          );
+        };
+        this._squire.addEventListener("willPaste", willPaste);
+        this._squireListeners.push(["willPaste", willPaste]);
+      }
       this.renderToolbar();
       this.updatePlaceholder();
       this.warnOnBlockInInlineRegion();
+      this.element.querySelectorAll("pre").forEach((pre) => this._authoredPres.add(pre));
     }
     getHTML() {
       return this._squire ? this._squire.getHTML() : this.element.innerHTML;
@@ -1748,10 +1851,18 @@ var RichClayBundle = (() => {
     // The only modified keys that do edit are the ones this editor rebound itself,
     // which is why the set is asked rather than Squire's dispatch mirrored.
     isEditingKey(event) {
-      if (["Backspace", "Delete", "Enter", "Tab"].includes(event.key)) return true;
+      if (["Backspace", "Delete", "Enter"].includes(event.key)) return true;
+      if (event.key === "Tab") return this.caretIsInList();
       if (event.key.length !== 1) return false;
       if (!event.ctrlKey && !event.metaKey && !event.altKey) return true;
       return event.ctrlKey && !event.metaKey && !event.altKey && this._appleDeleteKeys.has(event.key.toLowerCase());
+    }
+    caretIsInList() {
+      const range = this._squire?.getSelection();
+      const container = range?.startContainer;
+      if (!container) return false;
+      const element = container.nodeType === 1 ? container : container.parentElement;
+      return Boolean(element && this.element.contains(element) && element.closest("ul, ol"));
     }
     runControl(def) {
       if (!this._squire || typeof def.run !== "function") return;
@@ -1759,6 +1870,9 @@ var RichClayBundle = (() => {
       this.restoreSelection();
       if (def.mutates !== false) this.ensureRootIsEditable();
       const result = def.run(this);
+      this.element.querySelectorAll("pre:not([data-richclay-pre])").forEach((pre) => {
+        if (!this._authoredPres.has(pre)) pre.setAttribute("data-richclay-pre", "");
+      });
       if (def.mutates !== false) {
         this.ensureRootIsEditable();
         this.anchorSelectionInBlock();
@@ -2269,10 +2383,7 @@ var RichClayBundle = (() => {
   }
   function refuseUnsupportedRoot(element) {
     if (!isUnsupportedRootTag(element)) return false;
-    console.warn(
-      "richclay: a table element cannot be an editable region, so this one was skipped. Move the editable attribute to a <td>, a <th>, or an element inside one.",
-      element
-    );
+    console.warn(`richclay: ${unsupportedRootReason(element)} This region was skipped.`, element);
     return true;
   }
   function validateButton(def) {

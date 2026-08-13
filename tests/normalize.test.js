@@ -177,10 +177,13 @@ test("a root that ejects blocks is never given one", () => {
 // content, which is why it is a short list.
 test("keepsTextShape names the roots an author writes as a line of text", () => {
   const doc = region("<p>a</p>").ownerDocument;
-  ["p", "h2", "pre", "span", "a"].forEach(tag => {
+  [
+    "p", "h2", "pre", "span", "a",
+    "li", "td", "th", "dt", "dd", "figcaption", "summary", "caption"
+  ].forEach(tag => {
     assert.equal(keepsTextShape(doc.createElement(tag)), true, tag);
   });
-  ["div", "section", "td", "li"].forEach(tag => {
+  ["div", "section"].forEach(tag => {
     assert.equal(keepsTextShape(doc.createElement(tag)), false, tag);
   });
 });

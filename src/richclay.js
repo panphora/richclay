@@ -8,6 +8,7 @@ import {
   caretEdge,
   editorRootNeedsNormalization,
   ejectsBlocks,
+  flattenBlocks,
   hasBlockDescendant,
   isCaretHost,
   isInlineTag,
@@ -15,7 +16,8 @@ import {
   keepsTextShape,
   nodeLength,
   normalizeEditorRoot,
-  restoreRange
+  restoreRange,
+  unsupportedRootReason
 } from "./normalize.js";
 import { Toolbar } from "./toolbar.js";
 import { FloatingToolbar } from "./toolbar-float.js";
@@ -116,6 +118,7 @@ export default class RichClay {
     this._onRootTransfer = null;
     this._shortcutKeys = [];
     this._appleDeleteKeys = new Set();
+    this._authoredPres = new WeakSet();
     this._warnedInlineBlock = false;
     this._onFocus = () => {
       this.element.classList.add("richclay-focused");
@@ -327,9 +330,28 @@ export default class RichClay {
       };
       this.element.addEventListener("keydown", this._onToolbarKey);
     }
+    // Squire's paste path runs fixContainer over the pasted fragment, so pasting
+    // even two plain lines into a <h2 editable> lands a <div> the author never
+    // wrote. Flatten it where it arrives: this is the same promise the rest of the
+    // editor keeps, that richclay never manufactures a block in a region the
+    // author wrote as a line of text.
+    if (this.blocksStayOut()) {
+      const willPaste = event => {
+        const fragment = event.detail?.fragment;
+        if (!fragment) return;
+        const doc = this.element.ownerDocument;
+        flattenBlocks(fragment, () =>
+          this.options.singleLine ? doc.createTextNode(" ") : doc.createElement("br")
+        );
+      };
+      this._squire.addEventListener("willPaste", willPaste);
+      this._squireListeners.push(["willPaste", willPaste]);
+    }
     this.renderToolbar();
     this.updatePlaceholder();
     this.warnOnBlockInInlineRegion();
+    // Whatever <pre> elements exist before the first command are the author's.
+    this.element.querySelectorAll("pre").forEach(pre => this._authoredPres.add(pre));
   }
 
   getHTML() {
@@ -492,13 +514,25 @@ export default class RichClay {
   // The only modified keys that do edit are the ones this editor rebound itself,
   // which is why the set is asked rather than Squire's dispatch mirrored.
   isEditingKey(event) {
-    if (["Backspace", "Delete", "Enter", "Tab"].includes(event.key)) return true;
+    if (["Backspace", "Delete", "Enter"].includes(event.key)) return true;
+    // Squire acts on Tab only inside a list. Anywhere else it edits nothing, and
+    // treating it as an editing key made merely tabbing out of a fresh region run
+    // the repair and strip the author's source indentation.
+    if (event.key === "Tab") return this.caretIsInList();
     if (event.key.length !== 1) return false;
     if (!event.ctrlKey && !event.metaKey && !event.altKey) return true;
     return (
       event.ctrlKey && !event.metaKey && !event.altKey &&
       this._appleDeleteKeys.has(event.key.toLowerCase())
     );
+  }
+
+  caretIsInList() {
+    const range = this._squire?.getSelection();
+    const container = range?.startContainer;
+    if (!container) return false;
+    const element = container.nodeType === 1 ? container : container.parentElement;
+    return Boolean(element && this.element.contains(element) && element.closest("ul, ol"));
   }
 
   runControl(def) {
@@ -515,6 +549,11 @@ export default class RichClay {
     // heal below cannot undo it.
     if (def.mutates !== false) this.ensureRootIsEditable();
     const result = def.run(this);
+    // Stamp any <pre> this command just created, so the save hook can contain it
+    // without touching one the author wrote themselves.
+    this.element.querySelectorAll("pre:not([data-richclay-pre])").forEach(pre => {
+      if (!this._authoredPres.has(pre)) pre.setAttribute("data-richclay-pre", "");
+    });
     // After it too. Squire's removeCode() splices an emptied <pre> out onto the
     // root, and a caret parked on the orphan makes every later block command a
     // silent no-op.
@@ -1148,15 +1187,9 @@ function conflictsWithExistingEditor(element) {
   return true;
 }
 
-// A block written into the table structure is foster-parented out of the table
-// entirely on the next page load, so there is no version of this that works.
 function refuseUnsupportedRoot(element) {
   if (!isUnsupportedRootTag(element)) return false;
-  console.warn(
-    "richclay: a table element cannot be an editable region, so this one was skipped. " +
-      "Move the editable attribute to a <td>, a <th>, or an element inside one.",
-    element
-  );
+  console.warn(`richclay: ${unsupportedRootReason(element)} This region was skipped.`, element);
   return true;
 }
 

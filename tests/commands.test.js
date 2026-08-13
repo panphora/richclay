@@ -319,7 +319,41 @@ test("a table root is refused with a warning while a <td editable> mounts normal
   const cell = new RichClay(document.querySelector("[editable]"), { Squire: FakeSquire });
   assert.equal(cell.unsupported, false);
   assert.equal(cell.active, true);
-  assert.equal(cell.blocksStayOut(), false);
+  // A cell is a line of text the author wrote, so it keeps its shape: blocks stay
+  // out of it and the block controls are left off, exactly like an <h2 editable>.
+  assert.equal(cell.blocksStayOut(), true);
+});
+
+// One predicate, not four lists. Every family here fails the same test: can this
+// element hold HTML children that survive a save and a reload. <svg><text editable>
+// is the one that earns it on merit, because it looks like it works and only the
+// reload shows the text has jumped out of the graphic.
+test("the roots that cannot hold what richclay puts in them are refused", () => {
+  [
+    ["<svg editable><text>Label</text></svg>", /SVG or MathML/],
+    ["<textarea editable>plain</textarea>", /treats its content as plain text/],
+    ["<template editable><p>Hidden</p></template>", /keeps its content out of the document/],
+    ["<img editable src='a.png' alt=''>", /cannot contain anything/],
+    ["<table editable><tr><td>one</td></tr></table>", /table element cannot be an editable region/]
+  ].forEach(([markup, reason]) => {
+    setupDom(`<!doctype html><html><body>${markup}</body></html>`);
+    const warnings = [];
+    const original = console.warn;
+    console.warn = (...args) => warnings.push(args[0]);
+    let editor;
+    try {
+      editor = new RichClay(document.querySelector("[editable]"), { Squire: FakeSquire });
+    } finally {
+      console.warn = original;
+    }
+
+    assert.equal(editor.unsupported, true, markup);
+    assert.equal(editor.active, false, markup);
+    assert.equal(editor.element.hasAttribute("contenteditable"), false, markup);
+    assert.equal(warnings.length, 1, markup);
+    assert.match(warnings[0], reason, markup);
+    assert.match(warnings[0], /This region was skipped\./, markup);
+  });
 });
 
 // Menu items dispatch through runControl just like shortcuts do, so gating only

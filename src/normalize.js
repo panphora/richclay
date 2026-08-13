@@ -97,14 +97,51 @@ export function ejectsBlocks(root) {
 // Unlike the allowlist round 4 deleted, a wrong entry here costs a hidden toolbar
 // button or a preserved line of markup, never content, so a short list is the
 // right tool rather than a liability.
-const TEXT_LINE_ROOTS = new Set(["P", "H1", "H2", "H3", "H4", "H5", "H6", "PRE", "LABEL", "LEGEND"]);
+const TEXT_LINE_ROOTS = new Set([
+  "P", "H1", "H2", "H3", "H4", "H5", "H6", "PRE", "LABEL", "LEGEND",
+  "LI", "TD", "TH", "DT", "DD", "FIGCAPTION", "SUMMARY", "CAPTION"
+]);
 
 export function keepsTextShape(root) {
   return TEXT_LINE_ROOTS.has(root.nodeName) || isInlineTag(root);
 }
 
+const VOID_ROOTS = new Set([
+  "AREA", "BASE", "BR", "COL", "EMBED", "HR", "IMG", "INPUT",
+  "LINK", "META", "PARAM", "SOURCE", "TRACK", "WBR"
+]);
+const RAW_TEXT_ROOTS = new Set(["SCRIPT", "STYLE", "TEXTAREA", "TITLE", "IFRAME", "NOSCRIPT", "XMP"]);
+const HTML_NS = "http://www.w3.org/1999/xhtml";
+
+// Every family here fails one test: can this element hold HTML children that
+// survive a save and a reload. Table structure foster-parents them out, foreign
+// content breaks out of the SVG, raw-text roots turn them into literal text a
+// reader can see, <template> serializes .content and drops them, and a void
+// element cannot hold anything at all.
 export function isUnsupportedRootTag(root) {
-  return TABLE_STRUCTURE.has(root.nodeName);
+  return (
+    TABLE_STRUCTURE.has(root.nodeName) ||
+    VOID_ROOTS.has(root.nodeName) ||
+    RAW_TEXT_ROOTS.has(root.nodeName) ||
+    root.nodeName === "TEMPLATE" ||
+    Boolean(root.namespaceURI) && root.namespaceURI !== HTML_NS
+  );
+}
+
+export function unsupportedRootReason(root) {
+  if (TABLE_STRUCTURE.has(root.nodeName)) {
+    return "a table element cannot be an editable region. Move the editable attribute to a <td>, a <th>, or an element inside one.";
+  }
+  if (root.namespaceURI && root.namespaceURI !== HTML_NS) {
+    return "an SVG or MathML element cannot be an editable region: an edit puts an HTML block inside it, and the next page load moves that text out of the graphic entirely. Put a <foreignObject> in the SVG and mark an HTML element inside it instead.";
+  }
+  if (VOID_ROOTS.has(root.nodeName)) {
+    return "this element cannot contain anything, so there is nothing to edit. Move the editable attribute to an element that holds text.";
+  }
+  if (root.nodeName === "TEMPLATE") {
+    return "a <template> keeps its content out of the document, so edits to it are never saved.";
+  }
+  return "this element treats its content as plain text, so any edit would be saved as visible markup rather than formatting.";
 }
 
 // Shallow tag test, unlike isInlineNode which also walks children. Drives two

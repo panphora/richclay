@@ -1,4 +1,4 @@
-import { ejectsBlocks, flattenBlocks } from "./normalize.js";
+import { flattenBlocks, hasBlockDescendant } from "./normalize.js";
 
 export const RICHCLAY_SELECTOR = "[data-richclay], [richclay], [editable]";
 export const CHROME_SELECTOR =
@@ -13,6 +13,26 @@ const runtimeClasses = [
 ];
 
 const installedWindows = new WeakSet();
+
+// Two clients provide this API and they spell three things differently. hyperclayjs
+// owns window.hyperclay; clayjs owns window.clay and renamed the save transform to
+// addDocumentTransform. Reading `clay ?? hyperclay` as one namespace would resolve to
+// clay and then find no beforeSave, so richclay would silently stop stripping its own
+// chrome and every save would write toolbars into the author's file. Hence per
+// capability rather than per namespace.
+function hasPlatform(win) {
+  return Boolean(win.clay || win.hyperclay);
+}
+
+function platformEditMode(win) {
+  if (typeof win.clay?.isEditMode === "boolean") return win.clay.isEditMode;
+  if (typeof win.hyperclay?.isEditMode === "boolean") return win.hyperclay.isEditMode;
+  return null;
+}
+
+function platformDocumentTransform(win) {
+  return win.clay?.addDocumentTransform || win.hyperclay?.beforeSave || null;
+}
 
 // richclay's stylesheet carries save-remove, so no rule in richclay.css reaches
 // the saved file. A <pre> has `white-space: pre` and never wraps, so without
@@ -29,7 +49,7 @@ const PRE_CONTAINMENT = {
 export function shouldUseHyperclay(options = {}, win = window) {
   if (options.hyperclay === false) return false;
   if (options.hyperclay === true) return true;
-  return Boolean(win.hyperclay || hasEditmodeSignal(win));
+  return Boolean(hasPlatform(win) || hasEditmodeSignal(win));
 }
 
 export function isHyperclayEditMode(win = window) {
@@ -40,9 +60,8 @@ export function isHyperclayEditMode(win = window) {
     return win.__hyperclayEditMode;
   }
 
-  if (typeof win.hyperclay?.isEditMode === "boolean") {
-    return win.hyperclay.isEditMode;
-  }
+  const fromPlatform = platformEditMode(win);
+  if (fromPlatform !== null) return fromPlatform;
 
   return readEditmodeCookie(win);
 }
@@ -71,10 +90,10 @@ export function parseEditableOptions(element) {
 
 export function installHyperclayBridge(win = window) {
   if (installedWindows.has(win)) return;
-  const beforeSave = win.hyperclay?.beforeSave;
-  if (typeof beforeSave !== "function") return;
+  const addDocumentTransform = platformDocumentTransform(win);
+  if (typeof addDocumentTransform !== "function") return;
 
-  beforeSave(docElem => stripRichClayFromClone(docElem));
+  addDocumentTransform(docElem => stripRichClayFromClone(docElem));
   installedWindows.add(win);
 }
 
@@ -82,6 +101,12 @@ export function stripRichClayFromClone(docElem) {
   docElem.querySelectorAll?.(CHROME_SELECTOR).forEach(node => node.remove());
 
   docElem.querySelectorAll?.(RICHCLAY_SELECTOR).forEach(region => {
+    // richclay only cleans up after itself. A region it never took ownership of,
+    // because it refused the root or was never activated, is the author's markup
+    // and has to come through the save byte for byte. setupEditorAttributes sets
+    // this marker in the same breath as every other runtime attribute, so its
+    // absence means there is nothing here to strip and nothing here to repair.
+    if (region.getAttribute("data-richclay-active") !== "true") return;
     removeRuntimeState(region, "save");
     // The only place this has to be right. Damage happens when markup reaches the
     // file, so a flatten here sits downstream of every Squire route: setHTML,
@@ -98,6 +123,12 @@ export function stripRichClayFromClone(docElem) {
       flattenBlocks(region, () =>
         singleLine ? doc.createTextNode(" ") : doc.createElement("br")
       );
+      // flattenBlocks only unwraps blocks, so it cannot repair <a> inside <a>. Same
+      // idea, one tag: keep the text, drop the nested duplicate.
+      region.querySelectorAll(region.localName).forEach(nested => {
+        while (nested.firstChild) nested.parentNode.insertBefore(nested.firstChild, nested);
+        nested.remove();
+      });
     }
     if (region.matches?.('[editable~="single-line"]')) unwrapLoneSingleLineBlock(region);
     region.querySelectorAll("#squire-selection-start, #squire-selection-end").forEach(node => {
@@ -105,30 +136,79 @@ export function stripRichClayFromClone(docElem) {
     });
     region.querySelectorAll(".squire-image-resize-container").forEach(node => node.remove());
     stripZeroWidthArtifacts(region);
-    // The region itself may be the <pre>, and an author's own inline sizing wins:
-    // this only supplies what is missing, because richclay's stylesheet is
-    // stripped on save and something has to keep a long line from running off the
-    // page.
-    const codeBlocks = region.matches?.("pre")
+    // PRE_CONTAINMENT keeps a long line from running off the side of the published
+    // page, where richclay's stylesheet has been stripped by save-remove. It has to
+    // ride the markup for that reason. It must not ride an author's own <pre>: those
+    // are theirs, their CSS already handles them, and writing width: 0 into a file
+    // that was only opened breaks the byte-identical-on-open invariant everything
+    // else here defends. Only a <pre> richclay made gets contained.
+    const codeBlocks = (region.matches?.("pre")
       ? [region, ...region.querySelectorAll("pre")]
-      : Array.from(region.querySelectorAll("pre"));
+      : Array.from(region.querySelectorAll("pre"))
+    ).filter(pre => pre.hasAttribute("data-richclay-pre"));
+
     codeBlocks.forEach(pre => {
       Object.entries(PRE_CONTAINMENT).forEach(([property, value]) => {
         if (!pre.style[property]) pre.style[property] = value;
       });
+      pre.removeAttribute("data-richclay-pre");
     });
   });
+
+  // Squire leaves its selection bookmarks wherever the command was operating,
+  // which is not always inside a region. Sweeping the document costs one query and
+  // cannot leave one behind.
+  docElem
+    .querySelectorAll?.("#squire-selection-start, #squire-selection-end")
+    .forEach(node => node.remove());
 }
 
-// ejectsBlocks is structural. A single-line region is a promise the author made
-// instead, and it must not keep a block either.
+// The region's nearest block ancestor is the smallest subtree whose serialization
+// reproduces the ejection, for `p > span > span editable` as well as for
+// `div > h2 editable`. Deliberately no BODY: a region with no block ancestor at
+// all reparses correctly on its own, and scoping to BODY would serialize the
+// whole page on every save.
+const BLOCK_SCOPE =
+  "p, td, th, li, dl, dt, dd, table, blockquote, div, section, article, aside, main, header, footer, figure, figcaption";
+const MEASURE_ATTR = "data-richclay-measure";
+
+// Round trip the region through the real parser and see whether it still owns its
+// own content. This cannot be wrong about the parser, because it is the parser: it
+// covers the <p> rule, the whole implicitly-closes family (heading in heading, li
+// in li, a in a, dt/dd, td in td, button, form), and anything a future spec adds,
+// with no list to maintain and no list to get wrong for a fourth time.
 //
-// Structural only, deliberately not keepsTextShape. This hook exists to prevent
-// damage, and a block inside a heading or a span is stable: it is not richclay's
-// place to delete something a user pasted there on purpose. Keeping blocks out of
-// those regions is a UX decision enforced at the toolbar, not a save-time one.
+// It also draws the line the old structural predicate could not see. A <ul> pasted
+// into an <h2 editable> is stable, so it measures clean and is left alone; an <h3>
+// pasted into the same region ejects, so it is flattened. The hook no longer has to
+// know the difference between markup that is merely invalid and markup that is
+// doomed, because it can watch which one happens.
+function ejectsOnReload(region) {
+  const doc = region.ownerDocument;
+  const scope = region.closest(BLOCK_SCOPE) || region;
+  region.setAttribute(MEASURE_ATTR, "");
+  const probe = doc.createElement("div");
+  try {
+    probe.innerHTML = scope.outerHTML;
+  } finally {
+    region.removeAttribute(MEASURE_ATTR);
+  }
+  const reparsed = probe.querySelector(`[${MEASURE_ATTR}]`);
+  return !reparsed || reparsed.textContent !== region.textContent;
+}
+
+// A region can also lose content to an element of its own tag: the parser closes
+// the outer one when the inner start tag arrives. Asking the region which tag it is
+// keeps this out of list territory.
+const selfNests = region => Boolean(region.querySelector(region.localName));
+
+// hasBlockDescendant first, and not only as an optimisation: a region with no block
+// in it has nothing this hook could flatten, so measuring it would be work with no
+// possible outcome. Measured on an 8-paragraph region: the check is 0.02 ms and the
+// reparse it skips is 0.43 ms, so an ordinary save pays almost nothing.
 const needsFlattening = region =>
-  ejectsBlocks(region) || Boolean(region.matches?.('[editable~="single-line"]'));
+  Boolean(region.matches?.('[editable~="single-line"]')) ||
+  ((hasBlockDescendant(region) || selfNests(region)) && ejectsOnReload(region));
 
 // Shared runtime-state removal used by both the save strip (on the cloned
 // document) and destroy() (on the live element). The contenteditable marker
@@ -169,6 +249,7 @@ export function removeRuntimeState(region, mode) {
 
   region.removeAttribute("data-richclay-active");
   region.removeAttribute("data-richclay-placeholder");
+  region.removeAttribute("data-richclay-pre");
   region.removeAttribute("data-richclay-runtime-role");
   region.removeAttribute("data-richclay-runtime-aria-multiline");
   region.removeAttribute("data-richclay-runtime-no-undo");

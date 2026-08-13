@@ -33,6 +33,11 @@ const icons = {
 
 const blocksOnly = editor => editor.blocksStayOut();
 
+// A link inside a link is not a thing HTML has: the parser splits them on the next
+// page load and everything after the inner one leaves the region. Squire will build
+// it happily, so the control is the place to stop it.
+const notInsideLink = editor => Boolean(editor.element.closest("a"));
+
 export const presets = {
   minimal: ["bold", "italic", "link", "unorderedList"],
   inline: [
@@ -110,6 +115,7 @@ export const defaultButtons = [
     group: "links",
     shortcut: "Mod+K",
     mutates: false,
+    isDisabled: notInsideLink,
     run: editor => editor.openLinkDialog(),
     isActive: editor => editor.selectionHasFormat("A")
   },
