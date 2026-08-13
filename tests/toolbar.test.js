@@ -3,6 +3,31 @@ import assert from "node:assert/strict";
 import { setupDom, FakeSquire, setPlatform } from "./helpers.js";
 import RichClay from "../src/richclay.js";
 
+// An inline region's toolbar is the floating one, which is built on focus.
+const mountToolbar = markup => {
+  setupDom(`<!doctype html><html><body>${markup}</body></html>`);
+  const element = document.querySelector("[editable]");
+  new RichClay(element, { Squire: FakeSquire });
+  element.dispatchEvent(new window.FocusEvent("focus"));
+  const root = document.querySelector("[data-richclay-toolbar]");
+  return {
+    root,
+    controls: Array.from(root.querySelectorAll("[data-richclay-control]")).map(
+      button => button.dataset.richclayControl
+    )
+  };
+};
+
+const strandedSeparators = root => {
+  const children = Array.from(root.children);
+  const isSeparator = node => node?.getAttribute("role") === "separator";
+  return children.filter(
+    (child, index) =>
+      isSeparator(child) &&
+      (index === 0 || index === children.length - 1 || isSeparator(children[index - 1]))
+  );
+};
+
 test("toolbar command calls Squire and reflects aria-pressed", () => {
   setupDom('<!doctype html><html><body><div data-richclay><p>Text</p></div></body></html>');
   const editor = new RichClay(document.querySelector("[data-richclay]"), {
@@ -45,7 +70,11 @@ test("menu opens with keyboard, tracks active item, and closes on Escape", () =>
     Squire: FakeSquire,
     toolbar: ["blockMenu"]
   });
-  editor.squire.path = "H2";
+  // pathHas reads the DOM, so the caret has to sit in the heading it reports.
+  const heading = document.querySelector("h2");
+  const range = document.createRange();
+  range.selectNodeContents(heading);
+  editor.squire.setSelection(range);
 
   const trigger = document.querySelector("[data-richclay-control='blockMenu']");
   trigger.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -103,12 +132,21 @@ test("pointer activation preserves the selection (mousedown is prevented and the
   assert.equal(editor.savedSelection !== null, true);
 });
 
+// A control the root disables is left out of the toolbar entirely, so the one that
+// renders and then greys out is the selection-dependent kind.
 test("a disabled control is skipped by the tab stop and arrow navigation", () => {
   setupDom('<!doctype html><html><body><div data-richclay><p>x</p></div></body></html>');
-  new RichClay(document.querySelector("[data-richclay]"), {
+  let unavailable = false;
+  const editor = new RichClay(document.querySelector("[data-richclay]"), {
     Squire: FakeSquire,
-    toolbar: ["bold", { id: "dis", label: "Disabled", run() {}, isDisabled: () => true }, "italic"]
+    toolbar: [
+      "bold",
+      { id: "dis", label: "Disabled", run() {}, isDisabled: () => unavailable },
+      "italic"
+    ]
   });
+  unavailable = true;
+  editor.toolbar.update();
 
   const controls = () => Array.from(document.querySelectorAll("[data-richclay-control]"));
   assert.equal(controls()[1].disabled, true);
@@ -117,6 +155,22 @@ test("a disabled control is skipped by the tab stop and arrow navigation", () =>
   controls()[0].dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
   // ArrowRight jumps over the disabled control to the next enabled one.
   assert.deepEqual(controls().map(button => button.tabIndex), [-1, -1, 0]);
+});
+
+// Whether a region can hold blocks never changes for its whole life, so a greyed
+// button would say "not right now" and invite clicking. The controls are left out
+// instead, and the separators around them collapse rather than stranding.
+test("the toolbar leaves out the block controls a <p editable> can never use", () => {
+  const blockControls = ["blockMenu", "unorderedList", "orderedList", "quote", "outdent", "indent"];
+
+  const ejecting = mountToolbar("<p editable>Hello</p>");
+  blockControls.forEach(id => assert.equal(ejecting.controls.includes(id), false, id));
+  assert.equal(ejecting.controls.includes("bold"), true);
+  assert.deepEqual(strandedSeparators(ejecting.root), []);
+
+  const allowed = mountToolbar("<div editable><p>Hello</p></div>");
+  blockControls.forEach(id => assert.equal(allowed.controls.includes(id), true, id));
+  assert.deepEqual(strandedSeparators(allowed.root), []);
 });
 
 test("separators render as explicit items and at group boundaries", () => {

@@ -1,3 +1,5 @@
+import { ejectsBlocks, flattenBlocks } from "./normalize.js";
+
 export const RICHCLAY_SELECTOR = "[data-richclay], [richclay], [editable]";
 export const CHROME_SELECTOR =
   "[data-richclay-toolbar], [data-richclay-menu], [data-richclay-dialog], [data-richclay-live], [data-richclay-float]";
@@ -11,6 +13,18 @@ const runtimeClasses = [
 ];
 
 const installedWindows = new WeakSet();
+
+// richclay's stylesheet carries save-remove, so no rule in richclay.css reaches
+// the saved file. A <pre> has `white-space: pre` and never wraps, so without
+// containment one long line runs off the side of the published page. These four
+// declarations are the only ones that have to outlive edit mode, so they ride the
+// markup instead of the stylesheet.
+const PRE_CONTAINMENT = {
+  boxSizing: "border-box",
+  minWidth: "100%",
+  overflow: "auto",
+  width: "0"
+};
 
 export function shouldUseHyperclay(options = {}, win = window) {
   if (options.hyperclay === false) return false;
@@ -69,14 +83,52 @@ export function stripRichClayFromClone(docElem) {
 
   docElem.querySelectorAll?.(RICHCLAY_SELECTOR).forEach(region => {
     removeRuntimeState(region, "save");
+    // The only place this has to be right. Damage happens when markup reaches the
+    // file, so a flatten here sits downstream of every Squire route: setHTML,
+    // clear formatting, the image resizer, shortcuts, paste, and whatever a future
+    // Squire adds. Three rounds of chasing entry points end here.
+    //
+    // It cannot destroy the author's own blocks, which is what round 3b's version
+    // did: a block inside a region with a <p> ancestor cannot have come from their
+    // file, because the parser would have ejected it before richclay ever saw it.
+    // And it runs on a clone, so it cannot disturb the caret or the undo stack.
+    if (needsFlattening(region)) {
+      const doc = region.ownerDocument;
+      const singleLine = Boolean(region.matches?.('[editable~="single-line"]'));
+      flattenBlocks(region, () =>
+        singleLine ? doc.createTextNode(" ") : doc.createElement("br")
+      );
+    }
     if (region.matches?.('[editable~="single-line"]')) unwrapLoneSingleLineBlock(region);
     region.querySelectorAll("#squire-selection-start, #squire-selection-end").forEach(node => {
       node.remove();
     });
     region.querySelectorAll(".squire-image-resize-container").forEach(node => node.remove());
     stripZeroWidthArtifacts(region);
+    // The region itself may be the <pre>, and an author's own inline sizing wins:
+    // this only supplies what is missing, because richclay's stylesheet is
+    // stripped on save and something has to keep a long line from running off the
+    // page.
+    const codeBlocks = region.matches?.("pre")
+      ? [region, ...region.querySelectorAll("pre")]
+      : Array.from(region.querySelectorAll("pre"));
+    codeBlocks.forEach(pre => {
+      Object.entries(PRE_CONTAINMENT).forEach(([property, value]) => {
+        if (!pre.style[property]) pre.style[property] = value;
+      });
+    });
   });
 }
+
+// ejectsBlocks is structural. A single-line region is a promise the author made
+// instead, and it must not keep a block either.
+//
+// Structural only, deliberately not keepsTextShape. This hook exists to prevent
+// damage, and a block inside a heading or a span is stable: it is not richclay's
+// place to delete something a user pasted there on purpose. Keeping blocks out of
+// those regions is a UX decision enforced at the toolbar, not a save-time one.
+const needsFlattening = region =>
+  ejectsBlocks(region) || Boolean(region.matches?.('[editable~="single-line"]'));
 
 // Shared runtime-state removal used by both the save strip (on the cloned
 // document) and destroy() (on the live element). The contenteditable marker
@@ -109,6 +161,10 @@ export function removeRuntimeState(region, mode) {
   removeRuntimeAttribute(region, "role", "data-richclay-runtime-role");
   removeRuntimeAttribute(region, "aria-multiline", "data-richclay-runtime-aria-multiline");
   removeRuntimeAttribute(region, "no-undo", "data-richclay-runtime-no-undo");
+  if (region.getAttribute("data-richclay-runtime-display") === "true") {
+    region.style.removeProperty("display");
+    if (region.getAttribute("style") === "") region.removeAttribute("style");
+  }
   removeRuntimeDescribedBy(region);
 
   region.removeAttribute("data-richclay-active");
@@ -118,6 +174,7 @@ export function removeRuntimeState(region, mode) {
   region.removeAttribute("data-richclay-runtime-no-undo");
   region.removeAttribute("data-richclay-runtime-describedby");
   region.removeAttribute("data-richclay-runtime-contenteditable");
+  region.removeAttribute("data-richclay-runtime-display");
 }
 
 function stripZeroWidthArtifacts(region) {

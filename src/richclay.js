@@ -5,7 +5,15 @@ import {
 } from "./buttons.js";
 import {
   captureRange,
+  caretEdge,
   editorRootNeedsNormalization,
+  ejectsBlocks,
+  hasBlockDescendant,
+  isCaretHost,
+  isInlineTag,
+  isUnsupportedRootTag,
+  keepsTextShape,
+  nodeLength,
   normalizeEditorRoot,
   restoreRange
 } from "./normalize.js";
@@ -47,10 +55,8 @@ const autoInitWindows = new WeakSet();
 const watchedWindows = new WeakSet();
 const globalRegistry = createDefaultRegistry();
 const KEEP_FOCUS = Symbol("richclay-keep-focus");
-const BLOCK_TAG = "P";
 const ROOT_TRANSFER_EVENTS = ["cut", "paste", "drop"];
 const MODIFIER_ORDER = ["Alt", "Ctrl", "Meta", "Shift"];
-const LEAF_NODE_NAMES = new Set(["BR", "HR", "IFRAME", "IMG", "INPUT"]);
 let dialogSeq = 0;
 
 const defaultOptions = {
@@ -77,11 +83,19 @@ export default class RichClay {
     if (existing) return existing;
 
     this.element = element;
+    this.unsupported = conflictsWithExistingEditor(element) || refuseUnsupportedRoot(element);
     const derived = { ...parseEditableOptions(element), ...options };
     this.options = { ...defaultOptions, ...derived };
     if (this.options.singleLine && !("toolbar" in derived)) {
       this.options.toolbar = "inline";
     }
+    // Squire's _ensureBottomLine() appends a fresh default block whenever the
+    // root's last element child differs from blockTag, and it runs from every
+    // Backspace and Delete. With "P", any inline region ending in an <h2>, a
+    // <ul>, or the repair's own wrapper gained a permanent empty margined
+    // paragraph on the first delete. DIV also matches what Squire's fixContainer
+    // produces and carries no margins, which is what inline mode needs.
+    this._blockTag = this.options.inline ? "DIV" : "P";
     this.registry = new Map(globalRegistry);
     this.toolbar = null;
     this.float = null;
@@ -101,6 +115,8 @@ export default class RichClay {
     this._onRootKeydown = null;
     this._onRootTransfer = null;
     this._shortcutKeys = [];
+    this._appleDeleteKeys = new Set();
+    this._warnedInlineBlock = false;
     this._onFocus = () => {
       this.element.classList.add("richclay-focused");
       if (this.options.inline) this.ensureFloatingToolbar();
@@ -141,7 +157,7 @@ export default class RichClay {
   }
 
   static init(selector = RICHCLAY_SELECTOR, options = {}) {
-    const elements = resolveElements(selector);
+    const elements = resolveElements(selector).filter(element => !conflictsWithExistingEditor(element));
     return elements.map(element => new RichClay(element, options));
   }
 
@@ -166,7 +182,7 @@ export default class RichClay {
     watchedWindows.add(win);
 
     const mount = element => {
-      if (!instances.has(element)) new RichClay(element, options);
+      if (!instances.has(element) && !conflictsWithExistingEditor(element)) new RichClay(element, options);
     };
     const unmount = element => instances.get(element)?.destroy();
 
@@ -233,9 +249,18 @@ export default class RichClay {
   }
 
   activate() {
+    if (this.unsupported) return;
     if (this.active) return;
 
     this.active = true;
+    // A block inside an inline element renders as a run-on. This changes the box
+    // and nothing else: whether a region survives a reload is decided by the
+    // parser from tag names, before any CSS exists. Runtime only, so the author's
+    // file keeps no style richclay put there.
+    if (isInlineTag(this.element) && !this.element.style.display) {
+      this.element.style.display = "inline-block";
+      this.element.setAttribute("data-richclay-runtime-display", "true");
+    }
     ensureStyles(this.element.ownerDocument);
     consumeInertContenteditable(this.element);
 
@@ -253,7 +278,7 @@ export default class RichClay {
     this.liveRegion = createLiveRegion(this.element.ownerDocument);
 
     this._squire = new Squire(this.element, {
-      blockTag: BLOCK_TAG,
+      blockTag: this._blockTag,
       sanitizeToDOMFragment: (html, editor) => {
         const fragment = this.sanitizer.sanitizeToDOMFragment(html, editor);
         return this.options.singleLine ? flattenFragmentToSingleLine(fragment) : fragment;
@@ -282,7 +307,15 @@ export default class RichClay {
     if (this.options.inline && !this.options.singleLine) this.installRootGuards();
     // Before installShortcuts, so an explicitly declared Ctrl+ shortcut wins.
     this.installAppleDeleteKeys();
+    // Squire appends a default block whenever the root's last element child is not
+    // its blockTag, from Backspace over a selection, cut, and paste. Where blocks
+    // stay out that is a block nobody asked for, and the save hook is not enough on
+    // its own: flattening the block leaves its <br> behind, the next session adds
+    // another, and the file grows a blank line per edit. Prevention, because the
+    // cleanup has a residue.
+    if (this.blocksStayOut()) this._squire._ensureBottomLine = () => {};
     this.maskSquireCodeShortcut();
+    this.maskSquireBlockShortcuts();
     this.installShortcuts();
     if (this.options.inline) {
       this._onToolbarKey = event => {
@@ -296,6 +329,7 @@ export default class RichClay {
     }
     this.renderToolbar();
     this.updatePlaceholder();
+    this.warnOnBlockInInlineRegion();
   }
 
   getHTML() {
@@ -390,15 +424,15 @@ export default class RichClay {
     const owns = event => this.element.contains(event.target);
 
     this._onRootBeforeInput = event => {
-      if (!owns(event) || /^history/.test(event.inputType || "")) return;
+      // Repairing mid-composition mutates the DOM under the IME and moves the
+      // selection out from under it; repairing mid-undo fights the stack being
+      // replayed.
+      if (!owns(event) || event.isComposing || /^history/.test(event.inputType || "")) return;
       this.ensureRootIsEditable();
     };
     this._onRootKeydown = event => {
       if (!owns(event) || event.defaultPrevented || event.isComposing) return;
-      const types = event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey;
-      if (types || ["Backspace", "Delete", "Enter", "Tab"].includes(event.key)) {
-        this.ensureRootIsEditable();
-      }
+      if (this.isEditingKey(event)) this.ensureRootIsEditable();
     };
     this._onRootTransfer = event => {
       if (owns(event)) this.ensureRootIsEditable();
@@ -416,14 +450,16 @@ export default class RichClay {
   ensureRootIsEditable() {
     if (!this._squire || this.options.singleLine) return;
     const wrapBareRoot = this.options.inline;
-    if (!editorRootNeedsNormalization(this.element, { wrapBareRoot })) return;
+    const blocksAllowed = !this.blocksStayOut();
+    if (!editorRootNeedsNormalization(this.element, { wrapBareRoot, blocksAllowed })) return;
 
     const range = getSquireSelection(this._squire);
     const saved = range ? captureRange(this.element, range) : null;
     const repair = () => {
       normalizeEditorRoot(this.element, {
-        blockTag: BLOCK_TAG,
+        blockTag: this._blockTag,
         wrapBareRoot,
+        blocksAllowed,
         onBareRootWrapped: (root, wrapper) => {
           console.warn(
             "richclay: wrapped this region's loose text in a <div> so multi-line editing " +
@@ -436,8 +472,10 @@ export default class RichClay {
       });
     };
 
-    // Through modifyDocument so the repair lands in Squire's undo history rather
-    // than behind the user's back.
+    // Through modifyDocument so the repair is not recorded as a change of its
+    // own: it folds into the first edit's diff, which is what makes undo restore
+    // the byte-identical pre-repair source instead of stepping back into a
+    // half-repaired state.
     if (typeof this._squire.modifyDocument === "function") this._squire.modifyDocument(repair);
     else repair();
 
@@ -448,15 +486,42 @@ export default class RichClay {
     }
   }
 
+  // Only keys that will actually edit. Repairing is not free on a root that has
+  // not been repaired yet, which is every freshly opened page, so a blanket
+  // "any single-character key" made Cmd+C and Cmd+S rewrite an untouched region.
+  // The only modified keys that do edit are the ones this editor rebound itself,
+  // which is why the set is asked rather than Squire's dispatch mirrored.
+  isEditingKey(event) {
+    if (["Backspace", "Delete", "Enter", "Tab"].includes(event.key)) return true;
+    if (event.key.length !== 1) return false;
+    if (!event.ctrlKey && !event.metaKey && !event.altKey) return true;
+    return (
+      event.ctrlKey && !event.metaKey && !event.altKey &&
+      this._appleDeleteKeys.has(event.key.toLowerCase())
+    );
+  }
+
   runControl(def) {
     if (!this._squire || typeof def.run !== "function") return;
+    // Enforced here, not only where the toolbar renders: shortcuts and menu items
+    // reach this same path, and the block commands they carry are exactly the
+    // ones that put a <blockquote> inside a <p editable>.
+    if (def.isDisabled?.(this)) return;
     this.restoreSelection();
+    // Before the command, not only after. A toolbar click can be the first
+    // interaction with a page and no root guard fires for it, so a block command
+    // ran against the raw root: over two source-indented paragraphs, one list
+    // command produced two separate <ul>s. Both halves are block-valid, so the
+    // heal below cannot undo it.
+    if (def.mutates !== false) this.ensureRootIsEditable();
     const result = def.run(this);
-    // Block commands can leave inline content sitting directly on the root:
-    // Squire's removeCode() splices an emptied <pre> out that way, and a caret
-    // parked on the orphan makes every later block command a silent no-op.
-    this.ensureRootIsEditable();
-    this.anchorSelectionInBlock();
+    // After it too. Squire's removeCode() splices an emptied <pre> out onto the
+    // root, and a caret parked on the orphan makes every later block command a
+    // silent no-op.
+    if (def.mutates !== false) {
+      this.ensureRootIsEditable();
+      this.anchorSelectionInBlock();
+    }
     this.saveSelection();
     this.toolbar?.update();
     this.updatePlaceholder();
@@ -465,6 +530,7 @@ export default class RichClay {
     if (result !== KEEP_FOCUS) {
       this.focus();
     }
+    this.warnOnBlockInInlineRegion();
   }
 
   // Squire's modifyBlocks leaves the caret anchored on the root itself, between
@@ -475,9 +541,20 @@ export default class RichClay {
     const range = getSquireSelection(this._squire);
     if (!range?.collapsed || range.startContainer !== this.element) return;
 
-    const child = this.element.childNodes[range.startOffset] || this.element.lastChild;
+    const children = Array.from(this.element.childNodes);
+    const atEnd = range.startOffset >= children.length;
+    // Comments are skipped: a caret set inside a comment node is not a text
+    // position, and the region's markers are comments.
+    const child = atEnd
+      ? children.filter(isCaretHost).pop()
+      : children.slice(range.startOffset).find(isCaretHost) ||
+        children.slice(0, range.startOffset).filter(isCaretHost).pop();
     if (!child) return;
-    range.setStart(firstCaretPosition(child), 0);
+
+    // At the end of the region the caret belongs at the end of the last block,
+    // not thrown back to the start of the line it was sitting after.
+    const edge = caretEdge(child, !atEnd);
+    range.setStart(edge, atEnd ? nodeLength(edge) : 0);
     range.collapse(true);
     restoreSquireSelection(this._squire, range);
   }
@@ -491,9 +568,48 @@ export default class RichClay {
     }
   }
 
+  // Squire sets its path to "(selection)" whenever the selection spans more than
+  // one node, so asking the path answered "no" for every multi-block selection.
+  // Both boundaries must land in the same matching element, or a selection that
+  // merely starts in a list would report as being in one.
   pathHas(tag) {
-    const path = this._squire?.getPath?.() ?? this.path ?? "";
-    return new RegExp(`(?:^|>)${tag}(?:[.#\\[]|>|$)`, "i").test(path);
+    const range = getSquireSelection(this._squire);
+    if (!range) return false;
+    const selector = tag.toLowerCase();
+    const start = matchAtBoundary(this.element, range.startContainer, range.startOffset, true, selector);
+    return Boolean(start) &&
+      start === matchAtBoundary(this.element, range.endContainer, range.endOffset, false, selector);
+  }
+
+  // Blocks stay out of this region for either of two reasons, and both are fixed
+  // for the editor's life, which is why the toolbar can leave the controls out
+  // rather than grey them. Either the parser would eject a block on the next page
+  // load, or the author wrote the region as a line of text and richclay does not
+  // rewrite what they wrote.
+  blocksStayOut() {
+    return (
+      this.options.singleLine ||
+      ejectsBlocks(this.element) ||
+      keepsTextShape(this.element)
+    );
+  }
+
+  // Advisory only: the markup is stable and saves correctly, it just will not
+  // validate. Checked when the editor mounts and after any command, which covers
+  // the ways an author actually produces one. Paste is deliberately not covered:
+  // nothing hooks paste any more, and a console note is not worth reinstating a
+  // hook that took three rounds to get wrong.
+  warnOnBlockInInlineRegion() {
+    if (this._warnedInlineBlock || !isInlineTag(this.element)) return;
+    if (!hasBlockDescendant(this.element)) return;
+    this._warnedInlineBlock = true;
+    const tag = this.element.nodeName.toLowerCase();
+    console.warn(
+      `richclay: a block element inside <${tag} editable> is not valid HTML. It stays where it is ` +
+        "and saves correctly, but a validator will flag it. Put the editable attribute on a block " +
+        "element if you want blocks here.",
+      this.element
+    );
   }
 
   toggleFormat(tag, addMethod, removeMethod) {
@@ -858,6 +974,16 @@ export default class RichClay {
     defs.forEach(def => {
       if (def.type === "menu" || def.type === "separator") return;
       if (!def.shortcut || !def.id || seen.has(def.id)) return;
+      // isDisabled is a property of the root, not of the selection, so a control
+      // disabled here is disabled for this editor's whole life. Masked rather than
+      // skipped, for the same reason as maskSquireBlockShortcuts: not installing
+      // ours is what leaves Squire's own handler in charge.
+      if (def.isDisabled?.(this)) {
+        const masked = shortcutKey(def.shortcut, this.window);
+        this._squire.setKeyHandler(masked, null);
+        this._shortcutKeys.push(masked);
+        return;
+      }
       seen.add(def.id);
       const key = shortcutKey(def.shortcut, this.window);
       this._squire.setKeyHandler(key, (squire, event) => {
@@ -882,11 +1008,26 @@ export default class RichClay {
     this._shortcutKeys.push(key);
   }
 
+  // Squire binds these on _keyHandlers' prototype, and richclay has no definition
+  // carrying some of them, so filtering richclay's own shortcuts cannot reach
+  // them: Mod+] kept building a <blockquote> in a <p editable> through every
+  // round. An own property of null shadows the inherited handler and the key
+  // falls through. The prefix must match the one Squire computed, which is why
+  // the test harness has to agree about the platform.
+  maskSquireBlockShortcuts() {
+    if (!this.blocksStayOut()) return;
+    const mod = isApplePlatform(this.window) ? "Meta" : "Ctrl";
+    [`${mod}-]`, `${mod}-[`, `${mod}-Shift-8`, `${mod}-Shift-9`].forEach(key => {
+      this._squire.setKeyHandler(key, null);
+      this._shortcutKeys.push(key);
+    });
+  }
+
   // Squire's toggleCode() makes a block <pre> when the selection is collapsed,
-  // which inside a single-line region means a code block in the middle of a
-  // heading. Those regions get inline <code> instead.
+  // which inside a heading or a paragraph root means a code block where no block
+  // can legally go. Those regions get inline <code> instead.
   toggleCode() {
-    if (!this.options.singleLine) return this._squire.toggleCode();
+    if (!this.blocksStayOut()) return this._squire.toggleCode();
     if (this.selectionHasFormat("CODE")) return this._squire.changeFormat(null, { tag: "CODE" });
     return this._squire.changeFormat({ tag: "CODE" }, null);
   }
@@ -900,6 +1041,7 @@ export default class RichClay {
       if (typeof handlers[native] !== "function") return;
       this._squire.setKeyHandler(key, handlers[native]);
       this._shortcutKeys.push(key);
+      this._appleDeleteKeys.add(key.slice("Ctrl-".length));
     });
   }
 
@@ -967,6 +1109,57 @@ function resolveElements(selector) {
   return Array.from(selector || []);
 }
 
+// A selection anchored on the root itself, which is what Select All produces, has
+// no ancestor chain to walk, so the boundary is first resolved down to the node it
+// actually points at. Type selectors are ASCII case-insensitive in HTML documents
+// but jsdom's closest() is not, hence the lowercased selector.
+function matchAtBoundary(root, container, offset, first, selector) {
+  let node = container;
+  if (node === root) {
+    const children = Array.from(root.childNodes).filter(isCaretHost);
+    if (!children.length) return null;
+    const index = first
+      ? Math.min(offset, children.length - 1)
+      : Math.min(Math.max(offset - 1, 0), children.length - 1);
+    node = caretEdge(children[index], first);
+  }
+  const element = node?.nodeType === 1 ? node : node?.parentElement;
+  const match = element?.closest?.(selector);
+  return match && root.contains(match) && match !== root ? match : null;
+}
+
+// Two Squire instances mutating one subtree is undefined: the outer editor's
+// repair restructures the inner one's content behind its back, inside the outer's
+// modifyDocument, so the inner instance never sees it. Checked in both directions,
+// because the editors can be constructed in either order.
+function conflictsWithExistingEditor(element) {
+  const host = element.parentElement?.closest?.(RICHCLAY_SELECTOR);
+  const nested = Array.from(element.querySelectorAll?.(RICHCLAY_SELECTOR) || []).find(node =>
+    instances.has(node)
+  );
+  const other = host || nested;
+  if (!other) return false;
+  console.warn(
+    "richclay: nested editable regions are not supported, so this one was skipped. " +
+      "Remove the editable attribute from either it or the other region.",
+    element,
+    other
+  );
+  return true;
+}
+
+// A block written into the table structure is foster-parented out of the table
+// entirely on the next page load, so there is no version of this that works.
+function refuseUnsupportedRoot(element) {
+  if (!isUnsupportedRootTag(element)) return false;
+  console.warn(
+    "richclay: a table element cannot be an editable region, so this one was skipped. " +
+      "Move the editable attribute to a <td>, a <th>, or an element inside one.",
+    element
+  );
+  return true;
+}
+
 function validateButton(def) {
   if (!def || !def.id) throw new Error("RichClay button definitions require an id.");
   if (def.type !== "menu" && typeof def.run !== "function") {
@@ -992,16 +1185,6 @@ function shortcutKey(shortcut, win) {
       : keyPart;
   const prefix = MODIFIER_ORDER.filter(modifier => modifiers.has(modifier)).join("-");
   return `${prefix ? `${prefix}-` : ""}${key}`;
-}
-
-// Descends to the node a caret should actually live in: the first text node, or
-// the block itself when the block only holds a leaf like the placeholder <br>.
-function firstCaretPosition(node) {
-  let current = node;
-  while (current.firstChild && !LEAF_NODE_NAMES.has(current.firstChild.nodeName)) {
-    current = current.firstChild;
-  }
-  return current;
 }
 
 function normalizeModifier(modifier) {

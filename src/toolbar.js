@@ -81,7 +81,7 @@ export class Toolbar {
     this.menus.clear();
 
     let lastGroup = null;
-    this.controls.forEach((def, index) => {
+    this.visibleControls().forEach((def, index) => {
       if (def.type === "separator") {
         this.root.appendChild(createSeparator(this.root.ownerDocument));
         lastGroup = null;
@@ -102,6 +102,26 @@ export class Toolbar {
 
     this.ensureSingleTabStop();
     this.update();
+  }
+
+  // A control disabled by the root is disabled for this editor's whole life, not
+  // for this selection, so it is left out of the toolbar rather than rendered
+  // greyed: a greyed button says "not right now" and invites clicking, an absent
+  // one just gives a simpler toolbar. It stays disabled at dispatch as well,
+  // because hiding a button stops neither its shortcut nor its menu item.
+  visibleControls() {
+    const kept = this.controls.filter(
+      def => def.type === "separator" || !def.isDisabled?.(this.editor)
+    );
+    // Dropping controls strands separators, so collapse runs and trim the ends.
+    const trimmed = [];
+    kept.forEach(def => {
+      const previous = trimmed[trimmed.length - 1];
+      if (def.type === "separator" && (!previous || previous.type === "separator")) return;
+      trimmed.push(def);
+    });
+    while (trimmed[trimmed.length - 1]?.type === "separator") trimmed.pop();
+    return trimmed;
   }
 
   renderButton(def, index) {

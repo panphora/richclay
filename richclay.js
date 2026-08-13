@@ -48,6 +48,7 @@ var RichClayBundle = (() => {
     outdent: svg(`<line ${S} x1="3" x2="15" y1="4" y2="4"/><line ${S} x1="8" x2="15" y1="9" y2="9"/><line ${S} x1="3" x2="15" y1="14" y2="14"/><polyline ${S} points="5.5 7 3 9 5.5 11"/>`),
     blocks: svg(`<line ${S} x1="3" x2="15" y1="4" y2="4"/><line ${S} x1="3" x2="15" y1="9" y2="9"/><line ${S} x1="3" x2="10" y1="14" y2="14"/>`)
   };
+  var blocksOnly = (editor) => editor.blocksStayOut();
   var presets = {
     minimal: ["bold", "italic", "link", "unorderedList"],
     inline: [
@@ -138,6 +139,7 @@ var RichClayBundle = (() => {
       icon: icons.link,
       group: "links",
       shortcut: "Mod+K",
+      mutates: false,
       run: (editor) => editor.openLinkDialog(),
       isActive: (editor) => editor.selectionHasFormat("A")
     },
@@ -156,7 +158,8 @@ var RichClayBundle = (() => {
       "Mod+Shift+8",
       "lists",
       (editor) => editor.toggleList("UL"),
-      (editor) => editor.pathHas("UL")
+      (editor) => editor.pathHas("UL"),
+      blocksOnly
     ),
     toggle(
       "orderedList",
@@ -165,12 +168,13 @@ var RichClayBundle = (() => {
       "Mod+Shift+9",
       "lists",
       (editor) => editor.toggleList("OL"),
-      (editor) => editor.pathHas("OL")
+      (editor) => editor.pathHas("OL"),
+      blocksOnly
     ),
     toggle("quote", "Quote", icons.quote, null, "blocks", (editor) => {
       if (editor.pathHas("BLOCKQUOTE")) return editor.squire.decreaseQuoteLevel();
       return editor.squire.increaseQuoteLevel();
-    }, (editor) => editor.pathHas("BLOCKQUOTE")),
+    }, (editor) => editor.pathHas("BLOCKQUOTE"), blocksOnly),
     {
       id: "outdent",
       label: "Outdent",
@@ -178,6 +182,7 @@ var RichClayBundle = (() => {
       icon: icons.outdent,
       group: "blocks",
       shortcut: "Mod+[",
+      isDisabled: blocksOnly,
       run: (editor) => editor.outdent()
     },
     {
@@ -187,6 +192,7 @@ var RichClayBundle = (() => {
       icon: icons.indent,
       group: "blocks",
       shortcut: "Mod+]",
+      isDisabled: blocksOnly,
       run: (editor) => editor.indent()
     },
     {
@@ -196,6 +202,7 @@ var RichClayBundle = (() => {
       icon: icons.undo,
       group: "history",
       shortcut: "Mod+Z",
+      mutates: false,
       run: (editor) => editor.squire.undo()
     },
     {
@@ -205,6 +212,7 @@ var RichClayBundle = (() => {
       icon: icons.redo,
       group: "history",
       shortcut: "Mod+Shift+Z",
+      mutates: false,
       run: (editor) => editor.squire.redo()
     },
     {
@@ -222,6 +230,7 @@ var RichClayBundle = (() => {
       ariaLabel: "Choose block style",
       icon: icons.blocks,
       group: "blocks",
+      isDisabled: blocksOnly,
       options: [
         blockOption("Paragraph", "P"),
         blockOption("Heading 1", "H1"),
@@ -230,19 +239,21 @@ var RichClayBundle = (() => {
         {
           label: "Quote",
           value: "BLOCKQUOTE",
+          isDisabled: blocksOnly,
           run: (editor) => editor.squire.increaseQuoteLevel(),
           isActive: (editor) => editor.pathHas("BLOCKQUOTE")
         },
         {
           label: "Code block",
           value: "PRE",
+          isDisabled: blocksOnly,
           run: (editor) => editor.setBlockType("PRE"),
           isActive: (editor) => editor.pathHas("PRE")
         }
       ]
     }
   ];
-  function toggle(id, label, icon, shortcut, group, run, isActive = (editor) => editor.selectionHasFormat(labelTag(id))) {
+  function toggle(id, label, icon, shortcut, group, run, isActive = (editor) => editor.selectionHasFormat(labelTag(id)), isDisabled) {
     return {
       id,
       label,
@@ -250,6 +261,7 @@ var RichClayBundle = (() => {
       icon,
       group,
       shortcut,
+      isDisabled,
       run,
       isActive
     };
@@ -266,6 +278,7 @@ var RichClayBundle = (() => {
     return {
       label,
       value: tag,
+      isDisabled: blocksOnly,
       run: (editor) => editor.setBlockType(tag),
       isActive: (editor) => editor.pathHas(tag)
     };
@@ -274,30 +287,73 @@ var RichClayBundle = (() => {
   // src/normalize.js
   var INLINE_NODE_NAMES = /^(?:#text|A(?:BBR|CRONYM)?|B(?:R|D[IO])?|C(?:ITE|ODE)|D(?:ATA|EL|FN)|EM|FONT|HR|I(?:FRAME|MG|NPUT|NS)?|KBD|Q|R(?:P|T|UBY)|S(?:AMP|MALL|PAN|TR(?:IKE|ONG)|U[BP])?|TIME|U|VAR|WBR)$/;
   var NOT_WHITESPACE = /[^ \t\r\n]/;
-  var PRESERVES_WHITESPACE = /^(?:pre|break-spaces)/;
   var ELEMENT_NODE = 1;
   var TEXT_NODE = 3;
   var COMMENT_NODE = 8;
+  var LEAF_NODE_NAMES = /* @__PURE__ */ new Set(["BR", "HR", "IFRAME", "IMG", "INPUT", "WBR"]);
+  var FOREIGN_INLINE_ROOTS = /* @__PURE__ */ new Set(["svg", "math"]);
   function isInlineNode(node) {
     const type = node.nodeType;
     if (type === TEXT_NODE || type === COMMENT_NODE) return true;
     if (type !== ELEMENT_NODE) return false;
+    if (FOREIGN_INLINE_ROOTS.has(node.nodeName)) return true;
     if (!INLINE_NODE_NAMES.test(node.nodeName)) return false;
     return Array.from(node.childNodes).every(isInlineNode);
   }
   function isBlockContainer(element) {
     return Array.from(element.childNodes).some((node) => !isInlineNode(node));
   }
-  var BARE_ROOT_TAG = "DIV";
+  var isBlockElement = (node) => node?.nodeType === ELEMENT_NODE && !FOREIGN_INLINE_ROOTS.has(node.nodeName) && !INLINE_NODE_NAMES.test(node.nodeName);
+  function flattenBlocks(parent, createBoundary) {
+    const children = Array.from(parent.childNodes);
+    let removed = 0;
+    children.forEach((child, index) => {
+      if (child.nodeType !== ELEMENT_NODE || FOREIGN_INLINE_ROOTS.has(child.nodeName)) return;
+      removed += flattenBlocks(child, createBoundary);
+      if (!isBlockElement(child)) return;
+      if (isBlockElement(children[index - 1])) parent.insertBefore(createBoundary(), child);
+      while (child.firstChild) parent.insertBefore(child.firstChild, child);
+      child.remove();
+      removed += 1;
+    });
+    return removed;
+  }
+  var TABLE_STRUCTURE = /* @__PURE__ */ new Set(["TABLE", "THEAD", "TBODY", "TFOOT", "TR", "COLGROUP"]);
+  function ejectsBlocks(root) {
+    return Boolean(root.closest?.("p")) || TABLE_STRUCTURE.has(root.nodeName);
+  }
+  var TEXT_LINE_ROOTS = /* @__PURE__ */ new Set(["P", "H1", "H2", "H3", "H4", "H5", "H6", "PRE", "LABEL", "LEGEND"]);
+  function keepsTextShape(root) {
+    return TEXT_LINE_ROOTS.has(root.nodeName) || isInlineTag(root);
+  }
+  function isUnsupportedRootTag(root) {
+    return TABLE_STRUCTURE.has(root.nodeName);
+  }
+  function isInlineTag(node) {
+    return node.nodeType === ELEMENT_NODE && !FOREIGN_INLINE_ROOTS.has(node.nodeName) && INLINE_NODE_NAMES.test(node.nodeName);
+  }
+  function hasBlockDescendant(root) {
+    return Array.from(root.querySelectorAll("*")).some(isBlockElement);
+  }
   function normalizeEditorRoot(root, options = {}) {
-    const { blockTag = "P", wrapBareRoot = false, onBareRootWrapped } = options;
+    const {
+      blockTag = "DIV",
+      wrapBareRoot = false,
+      onBareRootWrapped,
+      blocksAllowed = !ejectsBlocks(root)
+    } = options;
     dropFormattingWhitespace(root);
-    wrapStrayInlineChildren(root, blockTag, wrapBareRoot, onBareRootWrapped);
+    if (blocksAllowed) {
+      wrapStrayInlineChildren(root, blockTag, wrapBareRoot, onBareRootWrapped);
+    }
     return root;
   }
-  function editorRootNeedsNormalization(root, { wrapBareRoot = false } = {}) {
-    if (!isBlockContainer(root)) return wrapBareRoot && Boolean(root.firstChild);
-    return Array.from(root.childNodes).some(isInlineNode) || hasNestedFormattingWhitespace(root);
+  var needsWrapping = (node) => isInlineNode(node) && node.nodeType !== COMMENT_NODE;
+  var isAuthorContent = (node) => node.nodeType !== COMMENT_NODE && !(node.nodeType === TEXT_NODE && !NOT_WHITESPACE.test(node.nodeValue));
+  function editorRootNeedsNormalization(root, { wrapBareRoot = false, blocksAllowed = !ejectsBlocks(root) } = {}) {
+    if (!blocksAllowed) return false;
+    if (!isBlockContainer(root)) return wrapBareRoot;
+    return Array.from(root.childNodes).some(needsWrapping) || hasNestedFormattingWhitespace(root);
   }
   function hasNestedFormattingWhitespace(element) {
     return Array.from(element.children).some((child) => {
@@ -319,8 +375,13 @@ var RichClayBundle = (() => {
   }
   function wrapStrayInlineChildren(root, blockTag, wrapBareRoot, onBareRootWrapped) {
     if (!isBlockContainer(root)) {
-      if (!wrapBareRoot || !root.firstChild) return;
-      const wrapper = root.ownerDocument.createElement(BARE_ROOT_TAG);
+      if (!wrapBareRoot) return;
+      const wrapper = root.ownerDocument.createElement(blockTag);
+      if (!Array.from(root.childNodes).some(isAuthorContent)) {
+        wrapper.appendChild(root.ownerDocument.createElement("BR"));
+        root.appendChild(wrapper);
+        return;
+      }
       while (root.firstChild) wrapper.appendChild(root.firstChild);
       root.appendChild(wrapper);
       onBareRootWrapped?.(root, wrapper);
@@ -342,10 +403,7 @@ var RichClayBundle = (() => {
     flush();
   }
   function preservesWhitespace(element) {
-    if (element.nodeName === "PRE") return true;
-    const view = element.ownerDocument.defaultView;
-    const whiteSpace = view?.getComputedStyle?.(element)?.whiteSpace || "";
-    return PRESERVES_WHITESPACE.test(whiteSpace);
+    return element.nodeName === "PRE";
   }
   function captureRange(root, range) {
     return {
@@ -360,18 +418,31 @@ var RichClayBundle = (() => {
     else applyBoundary(range, "setEnd", root, saved.end);
   }
   function captureBoundary(root, container, offset) {
-    if (container !== root && root.contains(container) && !isDroppedWhitespace(container)) {
-      return { container, offset };
+    if (!root.contains(container)) return { scope: root, after: [], before: [] };
+    if (container.nodeType === TEXT_NODE) {
+      if (!isDroppedWhitespace(container)) return { container, offset };
+      const scope = container.parentNode;
+      return siblingAnchor(scope, Array.from(scope.childNodes).indexOf(container));
     }
-    const children = Array.from(root.childNodes);
-    const index = container === root ? offset : children.indexOf(rootChildOf(root, container));
+    return {
+      container,
+      offset,
+      childCount: container.childNodes.length,
+      ...siblingAnchor(container, offset)
+    };
+  }
+  function siblingAnchor(scope, index) {
+    const children = Array.from(scope.childNodes);
     const at = Math.max(0, index);
-    return { after: children.slice(at), before: children.slice(0, at).reverse() };
+    return { scope, after: children.slice(at), before: children.slice(0, at).reverse() };
   }
   function applyBoundary(range, method, root, boundary) {
-    if (boundary.container && root.contains(boundary.container)) {
-      range[method](boundary.container, Math.min(boundary.offset, nodeLength(boundary.container)));
-      return;
+    const { container, childCount } = boundary;
+    if (container && root.contains(container)) {
+      if (childCount === void 0 || childCount === container.childNodes.length) {
+        range[method](container, Math.min(boundary.offset, nodeLength(container)));
+        return;
+      }
     }
     const after = boundary.after?.find((node) => root.contains(node));
     if (after) {
@@ -384,20 +455,20 @@ var RichClayBundle = (() => {
       range[method](edge, nodeLength(edge));
       return;
     }
-    range[method](root, 0);
+    const scope = boundary.scope && root.contains(boundary.scope) ? boundary.scope : root;
+    range[method](scope, 0);
   }
   function isDroppedWhitespace(node) {
     return node.nodeType === TEXT_NODE && !NOT_WHITESPACE.test(node.nodeValue) && Boolean(node.parentNode) && node.parentNode.nodeType === ELEMENT_NODE && isBlockContainer(node.parentNode) && !preservesWhitespace(node.parentNode);
   }
-  function rootChildOf(root, node) {
+  var isCaretHost = (node) => node.nodeType === ELEMENT_NODE || node.nodeType === TEXT_NODE;
+  function caretEdge(node, first = true) {
     let current = node;
-    while (current && current.parentNode && current.parentNode !== root) current = current.parentNode;
-    return current;
-  }
-  function caretEdge(node, first) {
-    let current = node;
-    while (current.nodeType === ELEMENT_NODE && current.firstChild && current.nodeName !== "BR") {
-      current = first ? current.firstChild : current.lastChild;
+    while (current.nodeType === ELEMENT_NODE && !FOREIGN_INLINE_ROOTS.has(current.nodeName)) {
+      const children = Array.from(current.childNodes).filter(isCaretHost);
+      const next = first ? children[0] : children[children.length - 1];
+      if (!next || LEAF_NODE_NAMES.has(next.nodeName)) break;
+      current = next;
     }
     return current;
   }
@@ -416,6 +487,12 @@ var RichClayBundle = (() => {
     "richclay-focused"
   ];
   var installedWindows = /* @__PURE__ */ new WeakSet();
+  var PRE_CONTAINMENT = {
+    boxSizing: "border-box",
+    minWidth: "100%",
+    overflow: "auto",
+    width: "0"
+  };
   function shouldUseHyperclay(options = {}, win = window) {
     if (options.hyperclay === false) return false;
     if (options.hyperclay === true) return true;
@@ -461,14 +538,29 @@ var RichClayBundle = (() => {
     docElem.querySelectorAll?.(CHROME_SELECTOR).forEach((node) => node.remove());
     docElem.querySelectorAll?.(RICHCLAY_SELECTOR).forEach((region) => {
       removeRuntimeState(region, "save");
+      if (needsFlattening(region)) {
+        const doc = region.ownerDocument;
+        const singleLine = Boolean(region.matches?.('[editable~="single-line"]'));
+        flattenBlocks(
+          region,
+          () => singleLine ? doc.createTextNode(" ") : doc.createElement("br")
+        );
+      }
       if (region.matches?.('[editable~="single-line"]')) unwrapLoneSingleLineBlock(region);
       region.querySelectorAll("#squire-selection-start, #squire-selection-end").forEach((node) => {
         node.remove();
       });
       region.querySelectorAll(".squire-image-resize-container").forEach((node) => node.remove());
       stripZeroWidthArtifacts(region);
+      const codeBlocks = region.matches?.("pre") ? [region, ...region.querySelectorAll("pre")] : Array.from(region.querySelectorAll("pre"));
+      codeBlocks.forEach((pre) => {
+        Object.entries(PRE_CONTAINMENT).forEach(([property, value]) => {
+          if (!pre.style[property]) pre.style[property] = value;
+        });
+      });
     });
   }
+  var needsFlattening = (region) => ejectsBlocks(region) || Boolean(region.matches?.('[editable~="single-line"]'));
   function removeRuntimeState(region, mode) {
     const origin = region.getAttribute("data-richclay-runtime-contenteditable");
     if (region.hasAttribute("contenteditable")) {
@@ -491,6 +583,10 @@ var RichClayBundle = (() => {
     removeRuntimeAttribute(region, "role", "data-richclay-runtime-role");
     removeRuntimeAttribute(region, "aria-multiline", "data-richclay-runtime-aria-multiline");
     removeRuntimeAttribute(region, "no-undo", "data-richclay-runtime-no-undo");
+    if (region.getAttribute("data-richclay-runtime-display") === "true") {
+      region.style.removeProperty("display");
+      if (region.getAttribute("style") === "") region.removeAttribute("style");
+    }
     removeRuntimeDescribedBy(region);
     region.removeAttribute("data-richclay-active");
     region.removeAttribute("data-richclay-placeholder");
@@ -499,6 +595,7 @@ var RichClayBundle = (() => {
     region.removeAttribute("data-richclay-runtime-no-undo");
     region.removeAttribute("data-richclay-runtime-describedby");
     region.removeAttribute("data-richclay-runtime-contenteditable");
+    region.removeAttribute("data-richclay-runtime-display");
   }
   function stripZeroWidthArtifacts(region) {
     const zwsp = String.fromCharCode(8203);
@@ -709,7 +806,7 @@ var RichClayBundle = (() => {
       this.items = [];
       this.menus.clear();
       let lastGroup = null;
-      this.controls.forEach((def, index) => {
+      this.visibleControls().forEach((def, index) => {
         if (def.type === "separator") {
           this.root.appendChild(createSeparator(this.root.ownerDocument));
           lastGroup = null;
@@ -727,6 +824,24 @@ var RichClayBundle = (() => {
       });
       this.ensureSingleTabStop();
       this.update();
+    }
+    // A control disabled by the root is disabled for this editor's whole life, not
+    // for this selection, so it is left out of the toolbar rather than rendered
+    // greyed: a greyed button says "not right now" and invites clicking, an absent
+    // one just gives a simpler toolbar. It stays disabled at dispatch as well,
+    // because hiding a button stops neither its shortcut nor its menu item.
+    visibleControls() {
+      const kept = this.controls.filter(
+        (def) => def.type === "separator" || !def.isDisabled?.(this.editor)
+      );
+      const trimmed = [];
+      kept.forEach((def) => {
+        const previous = trimmed[trimmed.length - 1];
+        if (def.type === "separator" && (!previous || previous.type === "separator")) return;
+        trimmed.push(def);
+      });
+      while (trimmed[trimmed.length - 1]?.type === "separator") trimmed.pop();
+      return trimmed;
     }
     renderButton(def, index) {
       const button = createToolbarButton(this.root.ownerDocument, def);
@@ -1285,10 +1400,8 @@ var RichClayBundle = (() => {
   var watchedWindows = /* @__PURE__ */ new WeakSet();
   var globalRegistry = createDefaultRegistry();
   var KEEP_FOCUS = Symbol("richclay-keep-focus");
-  var BLOCK_TAG = "P";
   var ROOT_TRANSFER_EVENTS = ["cut", "paste", "drop"];
   var MODIFIER_ORDER = ["Alt", "Ctrl", "Meta", "Shift"];
-  var LEAF_NODE_NAMES = /* @__PURE__ */ new Set(["BR", "HR", "IFRAME", "IMG", "INPUT"]);
   var dialogSeq = 0;
   var defaultOptions = {
     toolbar: "standard",
@@ -1311,11 +1424,13 @@ var RichClayBundle = (() => {
       const existing = instances.get(element);
       if (existing) return existing;
       this.element = element;
+      this.unsupported = conflictsWithExistingEditor(element) || refuseUnsupportedRoot(element);
       const derived = { ...parseEditableOptions(element), ...options };
       this.options = { ...defaultOptions, ...derived };
       if (this.options.singleLine && !("toolbar" in derived)) {
         this.options.toolbar = "inline";
       }
+      this._blockTag = this.options.inline ? "DIV" : "P";
       this.registry = new Map(globalRegistry);
       this.toolbar = null;
       this.float = null;
@@ -1335,6 +1450,8 @@ var RichClayBundle = (() => {
       this._onRootKeydown = null;
       this._onRootTransfer = null;
       this._shortcutKeys = [];
+      this._appleDeleteKeys = /* @__PURE__ */ new Set();
+      this._warnedInlineBlock = false;
       this._onFocus = () => {
         this.element.classList.add("richclay-focused");
         if (this.options.inline) this.ensureFloatingToolbar();
@@ -1363,7 +1480,7 @@ var RichClayBundle = (() => {
       return this.element.ownerDocument.defaultView || window;
     }
     static init(selector = RICHCLAY_SELECTOR, options = {}) {
-      const elements = resolveElements(selector);
+      const elements = resolveElements(selector).filter((element) => !conflictsWithExistingEditor(element));
       return elements.map((element) => new _RichClay(element, options));
     }
     static autoInit(win = typeof window !== "undefined" ? window : void 0) {
@@ -1385,7 +1502,7 @@ var RichClayBundle = (() => {
       if (!win || !win.document || watchedWindows.has(win)) return;
       watchedWindows.add(win);
       const mount = (element) => {
-        if (!instances.has(element)) new _RichClay(element, options);
+        if (!instances.has(element) && !conflictsWithExistingEditor(element)) new _RichClay(element, options);
       };
       const unmount = (element) => instances.get(element)?.destroy();
       const observer = new win.MutationObserver((records) => {
@@ -1442,8 +1559,13 @@ var RichClayBundle = (() => {
       return this;
     }
     activate() {
+      if (this.unsupported) return;
       if (this.active) return;
       this.active = true;
+      if (isInlineTag(this.element) && !this.element.style.display) {
+        this.element.style.display = "inline-block";
+        this.element.setAttribute("data-richclay-runtime-display", "true");
+      }
       ensureStyles(this.element.ownerDocument);
       consumeInertContenteditable(this.element);
       const initialNodes = this.options.inline ? Array.from(this.element.childNodes) : null;
@@ -1455,7 +1577,7 @@ var RichClayBundle = (() => {
       this.setupEditorAttributes();
       this.liveRegion = createLiveRegion(this.element.ownerDocument);
       this._squire = new Squire(this.element, {
-        blockTag: BLOCK_TAG,
+        blockTag: this._blockTag,
         sanitizeToDOMFragment: (html, editor) => {
           const fragment = this.sanitizer.sanitizeToDOMFragment(html, editor);
           return this.options.singleLine ? flattenFragmentToSingleLine(fragment) : fragment;
@@ -1474,7 +1596,10 @@ var RichClayBundle = (() => {
       if (this.options.singleLine) this.installSingleLineGuards();
       if (this.options.inline && !this.options.singleLine) this.installRootGuards();
       this.installAppleDeleteKeys();
+      if (this.blocksStayOut()) this._squire._ensureBottomLine = () => {
+      };
       this.maskSquireCodeShortcut();
+      this.maskSquireBlockShortcuts();
       this.installShortcuts();
       if (this.options.inline) {
         this._onToolbarKey = (event) => {
@@ -1488,6 +1613,7 @@ var RichClayBundle = (() => {
       }
       this.renderToolbar();
       this.updatePlaceholder();
+      this.warnOnBlockInInlineRegion();
     }
     getHTML() {
       return this._squire ? this._squire.getHTML() : this.element.innerHTML;
@@ -1569,15 +1695,12 @@ var RichClayBundle = (() => {
       const doc = this.element.ownerDocument;
       const owns = (event) => this.element.contains(event.target);
       this._onRootBeforeInput = (event) => {
-        if (!owns(event) || /^history/.test(event.inputType || "")) return;
+        if (!owns(event) || event.isComposing || /^history/.test(event.inputType || "")) return;
         this.ensureRootIsEditable();
       };
       this._onRootKeydown = (event) => {
         if (!owns(event) || event.defaultPrevented || event.isComposing) return;
-        const types = event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey;
-        if (types || ["Backspace", "Delete", "Enter", "Tab"].includes(event.key)) {
-          this.ensureRootIsEditable();
-        }
+        if (this.isEditingKey(event)) this.ensureRootIsEditable();
       };
       this._onRootTransfer = (event) => {
         if (owns(event)) this.ensureRootIsEditable();
@@ -1593,13 +1716,15 @@ var RichClayBundle = (() => {
     ensureRootIsEditable() {
       if (!this._squire || this.options.singleLine) return;
       const wrapBareRoot = this.options.inline;
-      if (!editorRootNeedsNormalization(this.element, { wrapBareRoot })) return;
+      const blocksAllowed = !this.blocksStayOut();
+      if (!editorRootNeedsNormalization(this.element, { wrapBareRoot, blocksAllowed })) return;
       const range = getSquireSelection(this._squire);
       const saved = range ? captureRange(this.element, range) : null;
       const repair = () => {
         normalizeEditorRoot(this.element, {
-          blockTag: BLOCK_TAG,
+          blockTag: this._blockTag,
           wrapBareRoot,
+          blocksAllowed,
           onBareRootWrapped: (root, wrapper) => {
             console.warn(
               `richclay: wrapped this region's loose text in a <div> so multi-line editing works. Wrap the content in your own block element to keep the markup you wrote, or use editable="single-line" if it is meant to be one line.`,
@@ -1617,12 +1742,27 @@ var RichClayBundle = (() => {
         this.savedSelection = cloneRange(range);
       }
     }
+    // Only keys that will actually edit. Repairing is not free on a root that has
+    // not been repaired yet, which is every freshly opened page, so a blanket
+    // "any single-character key" made Cmd+C and Cmd+S rewrite an untouched region.
+    // The only modified keys that do edit are the ones this editor rebound itself,
+    // which is why the set is asked rather than Squire's dispatch mirrored.
+    isEditingKey(event) {
+      if (["Backspace", "Delete", "Enter", "Tab"].includes(event.key)) return true;
+      if (event.key.length !== 1) return false;
+      if (!event.ctrlKey && !event.metaKey && !event.altKey) return true;
+      return event.ctrlKey && !event.metaKey && !event.altKey && this._appleDeleteKeys.has(event.key.toLowerCase());
+    }
     runControl(def) {
       if (!this._squire || typeof def.run !== "function") return;
+      if (def.isDisabled?.(this)) return;
       this.restoreSelection();
+      if (def.mutates !== false) this.ensureRootIsEditable();
       const result = def.run(this);
-      this.ensureRootIsEditable();
-      this.anchorSelectionInBlock();
+      if (def.mutates !== false) {
+        this.ensureRootIsEditable();
+        this.anchorSelectionInBlock();
+      }
       this.saveSelection();
       this.toolbar?.update();
       this.updatePlaceholder();
@@ -1630,6 +1770,7 @@ var RichClayBundle = (() => {
       if (result !== KEEP_FOCUS) {
         this.focus();
       }
+      this.warnOnBlockInInlineRegion();
     }
     // Squire's modifyBlocks leaves the caret anchored on the root itself, between
     // blocks. From there getStartBlockOfRange finds no block, so the next block
@@ -1638,9 +1779,12 @@ var RichClayBundle = (() => {
     anchorSelectionInBlock() {
       const range = getSquireSelection(this._squire);
       if (!range?.collapsed || range.startContainer !== this.element) return;
-      const child = this.element.childNodes[range.startOffset] || this.element.lastChild;
+      const children = Array.from(this.element.childNodes);
+      const atEnd = range.startOffset >= children.length;
+      const child = atEnd ? children.filter(isCaretHost).pop() : children.slice(range.startOffset).find(isCaretHost) || children.slice(0, range.startOffset).filter(isCaretHost).pop();
       if (!child) return;
-      range.setStart(firstCaretPosition(child), 0);
+      const edge = caretEdge(child, !atEnd);
+      range.setStart(edge, atEnd ? nodeLength(edge) : 0);
       range.collapse(true);
       restoreSquireSelection(this._squire, range);
     }
@@ -1652,9 +1796,39 @@ var RichClayBundle = (() => {
         return false;
       }
     }
+    // Squire sets its path to "(selection)" whenever the selection spans more than
+    // one node, so asking the path answered "no" for every multi-block selection.
+    // Both boundaries must land in the same matching element, or a selection that
+    // merely starts in a list would report as being in one.
     pathHas(tag) {
-      const path = this._squire?.getPath?.() ?? this.path ?? "";
-      return new RegExp(`(?:^|>)${tag}(?:[.#\\[]|>|$)`, "i").test(path);
+      const range = getSquireSelection(this._squire);
+      if (!range) return false;
+      const selector = tag.toLowerCase();
+      const start = matchAtBoundary(this.element, range.startContainer, range.startOffset, true, selector);
+      return Boolean(start) && start === matchAtBoundary(this.element, range.endContainer, range.endOffset, false, selector);
+    }
+    // Blocks stay out of this region for either of two reasons, and both are fixed
+    // for the editor's life, which is why the toolbar can leave the controls out
+    // rather than grey them. Either the parser would eject a block on the next page
+    // load, or the author wrote the region as a line of text and richclay does not
+    // rewrite what they wrote.
+    blocksStayOut() {
+      return this.options.singleLine || ejectsBlocks(this.element) || keepsTextShape(this.element);
+    }
+    // Advisory only: the markup is stable and saves correctly, it just will not
+    // validate. Checked when the editor mounts and after any command, which covers
+    // the ways an author actually produces one. Paste is deliberately not covered:
+    // nothing hooks paste any more, and a console note is not worth reinstating a
+    // hook that took three rounds to get wrong.
+    warnOnBlockInInlineRegion() {
+      if (this._warnedInlineBlock || !isInlineTag(this.element)) return;
+      if (!hasBlockDescendant(this.element)) return;
+      this._warnedInlineBlock = true;
+      const tag = this.element.nodeName.toLowerCase();
+      console.warn(
+        `richclay: a block element inside <${tag} editable> is not valid HTML. It stays where it is and saves correctly, but a validator will flag it. Put the editable attribute on a block element if you want blocks here.`,
+        this.element
+      );
     }
     toggleFormat(tag, addMethod, removeMethod) {
       if (this.selectionHasFormat(tag)) return this._squire[removeMethod]();
@@ -1952,6 +2126,12 @@ var RichClayBundle = (() => {
       defs.forEach((def) => {
         if (def.type === "menu" || def.type === "separator") return;
         if (!def.shortcut || !def.id || seen.has(def.id)) return;
+        if (def.isDisabled?.(this)) {
+          const masked = shortcutKey(def.shortcut, this.window);
+          this._squire.setKeyHandler(masked, null);
+          this._shortcutKeys.push(masked);
+          return;
+        }
         seen.add(def.id);
         const key = shortcutKey(def.shortcut, this.window);
         this._squire.setKeyHandler(key, (squire, event) => {
@@ -1974,11 +2154,25 @@ var RichClayBundle = (() => {
       this._squire.setKeyHandler(key, null);
       this._shortcutKeys.push(key);
     }
+    // Squire binds these on _keyHandlers' prototype, and richclay has no definition
+    // carrying some of them, so filtering richclay's own shortcuts cannot reach
+    // them: Mod+] kept building a <blockquote> in a <p editable> through every
+    // round. An own property of null shadows the inherited handler and the key
+    // falls through. The prefix must match the one Squire computed, which is why
+    // the test harness has to agree about the platform.
+    maskSquireBlockShortcuts() {
+      if (!this.blocksStayOut()) return;
+      const mod = isApplePlatform(this.window) ? "Meta" : "Ctrl";
+      [`${mod}-]`, `${mod}-[`, `${mod}-Shift-8`, `${mod}-Shift-9`].forEach((key) => {
+        this._squire.setKeyHandler(key, null);
+        this._shortcutKeys.push(key);
+      });
+    }
     // Squire's toggleCode() makes a block <pre> when the selection is collapsed,
-    // which inside a single-line region means a code block in the middle of a
-    // heading. Those regions get inline <code> instead.
+    // which inside a heading or a paragraph root means a code block where no block
+    // can legally go. Those regions get inline <code> instead.
     toggleCode() {
-      if (!this.options.singleLine) return this._squire.toggleCode();
+      if (!this.blocksStayOut()) return this._squire.toggleCode();
       if (this.selectionHasFormat("CODE")) return this._squire.changeFormat(null, { tag: "CODE" });
       return this._squire.changeFormat({ tag: "CODE" }, null);
     }
@@ -1990,6 +2184,7 @@ var RichClayBundle = (() => {
         if (typeof handlers[native] !== "function") return;
         this._squire.setKeyHandler(key, handlers[native]);
         this._shortcutKeys.push(key);
+        this._appleDeleteKeys.add(key.slice("Ctrl-".length));
       });
     }
     installSingleLineGuards() {
@@ -2046,6 +2241,40 @@ var RichClayBundle = (() => {
     if (selector?.nodeType === 1) return [selector];
     return Array.from(selector || []);
   }
+  function matchAtBoundary(root, container, offset, first, selector) {
+    let node = container;
+    if (node === root) {
+      const children = Array.from(root.childNodes).filter(isCaretHost);
+      if (!children.length) return null;
+      const index = first ? Math.min(offset, children.length - 1) : Math.min(Math.max(offset - 1, 0), children.length - 1);
+      node = caretEdge(children[index], first);
+    }
+    const element = node?.nodeType === 1 ? node : node?.parentElement;
+    const match = element?.closest?.(selector);
+    return match && root.contains(match) && match !== root ? match : null;
+  }
+  function conflictsWithExistingEditor(element) {
+    const host = element.parentElement?.closest?.(RICHCLAY_SELECTOR);
+    const nested = Array.from(element.querySelectorAll?.(RICHCLAY_SELECTOR) || []).find(
+      (node) => instances.has(node)
+    );
+    const other = host || nested;
+    if (!other) return false;
+    console.warn(
+      "richclay: nested editable regions are not supported, so this one was skipped. Remove the editable attribute from either it or the other region.",
+      element,
+      other
+    );
+    return true;
+  }
+  function refuseUnsupportedRoot(element) {
+    if (!isUnsupportedRootTag(element)) return false;
+    console.warn(
+      "richclay: a table element cannot be an editable region, so this one was skipped. Move the editable attribute to a <td>, a <th>, or an element inside one.",
+      element
+    );
+    return true;
+  }
   function validateButton(def) {
     if (!def || !def.id) throw new Error("RichClay button definitions require an id.");
     if (def.type !== "menu" && typeof def.run !== "function") {
@@ -2060,13 +2289,6 @@ var RichClayBundle = (() => {
     const key = keyPart.length === 1 ? modifiers.has("Shift") ? keyPart.toUpperCase() : keyPart.toLowerCase() : keyPart;
     const prefix = MODIFIER_ORDER.filter((modifier) => modifiers.has(modifier)).join("-");
     return `${prefix ? `${prefix}-` : ""}${key}`;
-  }
-  function firstCaretPosition(node) {
-    let current = node;
-    while (current.firstChild && !LEAF_NODE_NAMES.has(current.firstChild.nodeName)) {
-      current = current.firstChild;
-    }
-    return current;
   }
   function normalizeModifier(modifier) {
     return modifier === "Cmd" ? "Meta" : modifier;

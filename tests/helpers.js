@@ -16,10 +16,20 @@ export function setupDom(html = "<!doctype html><html><body></body></html>", url
   return dom;
 }
 
-// jsdom reports an empty navigator.platform, so shortcut tests have to state
-// which platform they mean instead of inheriting whatever the host looks like.
+// jsdom reports an empty navigator.platform, so shortcut tests have to state which
+// platform they mean instead of inheriting whatever the host looks like. Both
+// values are stamped because the two engines read different ones: Squire takes its
+// modifier prefix from userAgent at module-eval time, richclay from platform, and
+// setting only platform put them in different keyboard modes for every test that
+// touches a shortcut.
 export function setPlatform(win, platform) {
   Object.defineProperty(win.navigator, "platform", { value: platform, configurable: true });
+  const mac = platform.startsWith("Mac");
+  const os = mac ? "Macintosh; Intel Mac OS X 10_15_7" : "Windows NT 10.0; Win64; x64";
+  Object.defineProperty(win.navigator, "userAgent", {
+    value: `Mozilla/5.0 (${os}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36`,
+    configurable: true
+  });
 }
 
 export class FakeSquire {
@@ -36,7 +46,16 @@ export class FakeSquire {
     this.selection.collapse(true);
     // Squire exposes its built-in keydown handlers here; richclay repoints the
     // macOS Ctrl delete bindings at them.
-    this._keyHandlers = { Delete() {}, Backspace() {} };
+    //
+    // Squire builds this with Object.create so its defaults live on the
+    // prototype; maskSquireCodeShortcut exists specifically to shadow an
+    // inherited handler with an own null, which a plain object cannot exercise.
+    this._keyHandlers = Object.create({
+      Delete() {},
+      Backspace() {},
+      "Meta-d"() {},
+      "Ctrl-d"() {}
+    });
     root.setAttribute("contenteditable", "true");
     this.setHTML("");
   }
@@ -241,6 +260,12 @@ export class FakeSquire {
 
   removeAllFormatting() {
     this.commands.push("removeAllFormatting");
+    return this;
+  }
+
+  modifyDocument(fn) {
+    this.modifiedDocument = (this.modifiedDocument || 0) + 1;
+    fn();
     return this;
   }
 

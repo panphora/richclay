@@ -41,11 +41,15 @@ The saved region loses:
 
 `snapshot-remove` and `no-watch` are added to generated chrome so Hyperclay ignores high-churn editor UI during snapshots and mutation watching. Those nodes are removed before save.
 
+The one thing the strip *adds* is `<pre>` containment, written as an inline style on every `<pre>` in the region. `ensureStyles` injects richclay's stylesheet with `save-remove` and `save-ignore`, so no rule in `richclay.css` reaches the saved file, and a `<pre>` has `white-space: pre` and never wraps — without containment one long line runs off the side of the published page. Those four declarations (`box-sizing`, `min-width`, `overflow`, `width`) are the only ones that have to outlive edit mode, so they ride the markup instead of the stylesheet. It runs on the clone, so the live DOM is untouched, and it is idempotent across repeated saves.
+
 ## Keyboard Shortcuts
 
-`Mod` resolves to one binding, not two: `Meta-` on Apple platforms and `Ctrl-` elsewhere, matching Squire's own `ctrlKey`. Binding both swallowed the macOS Emacs bindings that work in every other text field — Ctrl+D ran the code command and wrapped the block in `<pre>`, Ctrl+K opened the link dialog instead of killing to end of line. `shortcutKey()` also assembles modifiers in Squire's canonical `Alt-Ctrl-Meta-Shift-` order, since that is the string `_onKey` looks up.
+`Mod` resolves to one binding, not two: `Meta-` on Apple platforms and `Ctrl-` elsewhere, matching Squire's own `ctrlKey`. Binding both hijacked the macOS system text bindings that work in every other text field: Ctrl+D forward-delete ran Code and turned the caret's paragraph into a `<pre>`, Ctrl+K opened the link dialog instead of killing to end of line, Ctrl+B toggled bold. `shortcutKey()` also assembles modifiers in Squire's canonical `Alt-Ctrl-Meta-Shift-` order, since that is the string `_onKey` looks up. `isApplePlatform()` lives next to `formatShortcut` in src/buttons.js so a button's label and the key that fires it cannot drift.
 
-On Apple platforms, `Ctrl-d` and `Ctrl-h` are pointed at Squire's own `Delete` and `Backspace` handlers (`installAppleDeleteKeys`). Left native, Chrome merges two blocks by wrapping the moved text in a computed-style `<span>`, which is permanent markup in a DOM-is-the-document editor. Author-declared `Ctrl+` shortcuts still win, because `installShortcuts` runs after.
+Unbinding is not enough on its own. Left to Chrome's native handler, a forward delete across a paragraph boundary merges the blocks by welding in a computed-style `<span style="caret-color: …; font-family: …">`, permanently, in an editor whose DOM is the saved file. `installAppleDeleteKeys()` therefore points `Ctrl-d` and `Ctrl-h` at Squire's own `Delete` and `Backspace` handlers, which merge cleanly. It runs before `installShortcuts`, so an author-declared `Ctrl+` shortcut still wins. Because those handlers run on `keydown`, the root guard cannot skip modified keys: it triggers on any single-character key, modifiers included, and `ensureRootIsEditable` early-returns on a clean root.
+
+Code has no shortcut at all. One keystroke turning a paragraph of prose into a code block is a sharp edge, and `Mod+D` also shadows the browser's bookmark shortcut. Squire binds Code itself, on `_keyHandlers`'s **prototype**, so dropping richclay's binding is not enough: `maskSquireCodeShortcut()` sets an own property of `null` to shadow the inherited handler. Where a block cannot legally go — a single-line region, or any phrasing-only root — `toggleCode()` applies inline `<code>` via `changeFormat` instead, because Squire's block toggle would put a `<pre>` inside the heading.
 
 ## Undo Interop
 
@@ -70,7 +74,17 @@ Squire assumes a container's children are all block-level. `fixContainer()` enfo
 
 - whitespace-only text nodes are dropped **only** where they sit between block-level siblings, which is where they render as nothing. Inside a block (`<p>a <b>b</b></p>`) and anywhere white-space is preserved, they are content and are kept.
 - runs of stray inline content on a root that already mixes blocks with inline nodes are wrapped in one `blockTag` element. That is the case the browser already renders as an anonymous block. A comments-only run is left alone rather than turned into a blank paragraph.
-- a wholly inline root is left byte-identical in a single-line region, which has no block structure by design. In a multi-line one it gets a single bare `<div>` wrapper, because Squire's Enter, Delete, and Backspace all early-return when the caret's block is the root itself. `<div>` rather than `blockTag` so the page keeps the look the author gave it: a `<p>` would add margins to a region that had none. `onBareRootWrapped` fires when this happens and richclay logs a console warning, so an author who would rather write their own wrapper knows to.
+- a wholly inline root is left byte-identical in a single-line region, which has no block structure by design. In a multi-line one it gets a single bare wrapper, because Squire's Enter, Delete, and Backspace all early-return when the caret's block is the root itself. `onBareRootWrapped` fires when this happens and richclay logs a console warning, so an author who would rather write their own wrapper knows to. An empty region is the ordinary starting state rather than an author mistake, so it gets Squire's placeholder block (`<div><br></div>`) and no warning.
+
+### One block tag per mode, and roots that can't take one
+
+There is one block tag per mode, not two: `DIV` inline, `P` card. It is what richclay passes to Squire as `blockTag`, what a stray-inline run is wrapped in, and what a bare root's wrapper is. They used to differ, and Squire's `_ensureBottomLine()` punished it: it appends a fresh default block whenever the root's last element child is not `blockTag`, and it runs from every Backspace and Delete, so an inline region ending in the repair's own `<div>` wrapper gained a permanent empty margined `<p>` on the first delete. `DIV` also matches what `fixContainer` produces and carries no margins, which is what inline mode needs.
+
+`canHoldBlocks()` (src/normalize.js) decides whether a root can be wrapped, or take a block command, at all. A phrasing-only root such as `<p editable>` or `<h1 editable>` is **never** wrapped: a `<div>` inside a `<p>` serializes fine and then reparses as `<p editable></p><div>…</div><p></p>`, moving the author's own text outside their editable element. It is an allowlist of phrasing-only containers, so an unknown or custom element defaults to block-capable, which is the safe direction. The same predicate disables the list, quote, indent, and outdent controls on such a root, and sends `toggleCode()` down the inline `<code>` path.
+
+Nested editable regions are unsupported. Two Squire instances mutating one subtree is undefined: the outer editor's repair restructures the inner one's content behind its back, inside the outer's `modifyDocument`, so the inner instance never even sees it. `RichClay.init()`, `watch()`, and the constructor all refuse an element with an editable ancestor, with a console warning, rather than let it happen quietly.
+
+Whitespace preservation follows the `PRE` tag, matching Squire, rather than computed style. Reading computed style cost a forced style resolution per block container on every keystroke, and a `white-space: pre-wrap` root kept its indentation through the drop pass only for the wrap pass to turn it into visible blank blocks. A `pre-wrap` root with block children is therefore out of scope: its formatting whitespace is dropped like any other.
 
 ### When it runs
 
@@ -80,7 +94,11 @@ Squire assumes a container's children are all block-level. `fixContainer()` enfo
 
 The check is `editorRootNeedsNormalization()` on every edit rather than a latch, because Hyperclay's live sync morphs new DOM into the region long after activation and can reintroduce a loose text node.
 
-The repair runs inside `squire.modifyDocument()` so it lands in the undo history rather than behind the user's back, and `captureRange`/`restoreRange` carry the caret across it: a boundary inside a surviving node stays valid by itself, and the two that do not (one inside a dropped whitespace node, one anchored on the root whose child offsets shift) are re-anchored by remembering the root children on either side. `anchorSelectionInBlock()` follows a command: `modifyBlocks` re-anchors the caret on the root itself, which is the same dead position.
+`runControl` repairs on both sides of a command, not only after. A toolbar click can be the first interaction with a page, so no root guard has fired for it, and a block command run against the raw root produced two separate `<ul>`s over two source-indented paragraphs. Both halves are block-valid, so the heal afterwards cannot undo it. Controls that only open a dialog or replay history (`link`, `undo`, `redo`) carry `mutates: false` and skip both passes, since repairing on open rewrote the file for a dialog the user then cancelled.
+
+The repair runs inside `squire.modifyDocument()`, which suppresses change recording, and that is deliberate: the repair is not an edit of its own, it folds into the first edit's diff, and that is exactly what makes undo restore the byte-identical pre-repair source instead of stepping back into a half-repaired state. `captureRange`/`restoreRange` carry the caret across it. DOM Ranges are live, so removing a whitespace child has already decremented any boundary offset in that container by the time the repair finishes; re-applying a captured number double-counts it and moves the caret. A boundary inside a surviving text node stays valid by itself (text nodes are moved whole, never split), and an element-anchored one is re-anchored by remembering the neighbouring nodes rather than an index. `anchorSelectionInBlock()` follows a command: `modifyBlocks` re-anchors the caret on the root itself, which is the same dead position. At the end of the region it puts the caret at the end of the last block rather than the start of the line it was sitting after, and it skips comment children, which are not text positions.
+
+`resetSquireUndoBaseline()` is load-bearing, not a nicety. The fidelity-first attach bypasses `setHTML`, so without it stack state 0 is still the `<p><br></p>` Squire's constructor wrote during `setHTML("")`, and undo-to-initial wipes the region.
 
 The one visible cost is that the first edit strips the region's source indentation, so a saved file's editable regions serialize on one line from then on. That is a whitespace-only diff with no rendered effect, and the alternative is Squire converting the same whitespace into blank lines the user has to delete.
 
@@ -89,14 +107,6 @@ The one visible cost is that the first edit strips the region's source indentati
 ### Upstream Squire bug this works around
 
 `removeCode()` calls `fixContainer(pre, root)` to repair the root it is about to splice the `<pre>` out of, but that call returns immediately: `fixContainer`'s guard regex `/^(?:TABLE|TBODY|TR|TH|TD|P)/` has no end anchor, so `"PRE"` matches on the `P`. The repair never happens, and the `<pre>`'s children land directly on the root. Present on Squire's current master as well as the vendored 2.4.8. richclay works around it from its own side rather than patching `vendor/squire.js`, so the vendored file stays a clean drop-in.
-
-## Keyboard Shortcuts
-
-`Mod+` resolves to exactly one key per platform, `Meta-` on Apple and `Ctrl-` elsewhere, matching Squire's own `ctrlKey`. Binding both hijacked the macOS system text bindings: Ctrl+D forward-delete ran Code and turned the caret's paragraph into a `<pre>`, Ctrl+K opened the link dialog, Ctrl+B toggled bold. `isApplePlatform()` lives next to `formatShortcut` in src/buttons.js so a button's label and the key that fires it cannot drift.
-
-Unbinding is not enough on its own. Left to Chrome's native handler, a forward delete across a paragraph boundary merges the blocks by welding in a computed-style `<span style="caret-color: …; font-family: …">`, permanently, in an editor whose DOM is the saved file. `installAppleDeleteKeys()` therefore points `Ctrl-d` and `Ctrl-h` at Squire's own `Delete` and `Backspace` handlers, which merge cleanly. It runs before `installShortcuts`, so an author-declared `Ctrl+` shortcut still wins.
-
-Code has no shortcut at all. One keystroke turning a paragraph of prose into a code block is a sharp edge, and `Mod+D` also shadows the browser's bookmark shortcut. Squire binds Code itself, on `_keyHandlers`'s **prototype**, so dropping richclay's binding is not enough: `maskSquireCodeShortcut()` sets an own property of `null` to shadow the inherited handler. In a single-line region `toggleCode()` applies inline `<code>` via `changeFormat`, because Squire's block toggle would put a `<pre>` inside the heading.
 
 ## Sanitization Boundaries
 

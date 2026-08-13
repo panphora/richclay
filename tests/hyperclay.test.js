@@ -313,6 +313,133 @@ test("destroy restores the author's original non-true contenteditable value", ()
   assert.equal(element.getAttribute("contenteditable"), "false");
 });
 
+// The save hook is the one place this has to be right: it sits downstream of every
+// Squire route, so whatever leaked into a region a <p> ejects blocks from is
+// flattened before the markup reaches the file. Built with appendChild so the test
+// depends on no Squire route at all.
+test("the save strip flattens a block that leaked into a region under a <p>", () => {
+  setupDom('<!doctype html><html><body><p>Lead <span editable>Hello world</span> tail</p></body></html>');
+  const region = document.querySelector("[editable]");
+  const block = document.createElement("div");
+  block.textContent = "X";
+  region.appendChild(block);
+
+  const clone = document.documentElement.cloneNode(true);
+  stripRichClayFromClone(clone);
+
+  const saved = clone.querySelector("[editable]");
+  assert.equal(saved.querySelectorAll("div").length, 0);
+  assert.equal(saved.innerHTML, "Hello worldX");
+});
+
+// The author's own block, in a region nothing rearranges. Round 3b's whole-root
+// flatten destroyed exactly this.
+test("the save strip leaves a block alone in a region nothing ejects", () => {
+  setupDom('<!doctype html><html><body><div><span editable>Hello world</span></div></body></html>');
+  const region = document.querySelector("[editable]");
+  const block = document.createElement("div");
+  block.textContent = "X";
+  region.appendChild(block);
+
+  const clone = document.documentElement.cloneNode(true);
+  stripRichClayFromClone(clone);
+
+  assert.equal(clone.querySelector("[editable]").innerHTML, "Hello world<div>X</div>");
+});
+
+// The strip is structural, deliberately not keepsTextShape. Keeping blocks out of
+// a heading is a UX decision the toolbar enforces; a block that is already there
+// is stable, and deleting one a user pasted on purpose would be the hook
+// destroying content.
+test("the save strip leaves a block alone inside an <h2 editable>", () => {
+  setupDom('<!doctype html><html><body><div><h2 editable>Hello world</h2></div></body></html>');
+  const region = document.querySelector("[editable]");
+  const block = document.createElement("div");
+  block.textContent = "X";
+  region.appendChild(block);
+
+  const clone = document.documentElement.cloneNode(true);
+  stripRichClayFromClone(clone);
+
+  assert.equal(clone.querySelector("[editable]").innerHTML, "Hello world<div>X</div>");
+});
+
+// A block inside an inline element renders as a run-on, so the box is changed for
+// the edit session only. Whether the region survives a reload is decided by the
+// parser before any CSS exists, so nothing about this reaches the file.
+test("an inline region gets a runtime display that the save strip removes", () => {
+  setupDom('<!doctype html><html><body><div><span editable>Hello</span></div></body></html>');
+  const element = document.querySelector("[editable]");
+  new RichClay(element, { Squire: FakeSquire });
+
+  assert.equal(element.style.display, "inline-block");
+  assert.equal(element.getAttribute("data-richclay-runtime-display"), "true");
+
+  const clone = document.documentElement.cloneNode(true);
+  stripRichClayFromClone(clone);
+
+  const saved = clone.querySelector("[editable]");
+  assert.equal(saved.hasAttribute("style"), false);
+  assert.equal(saved.hasAttribute("data-richclay-runtime-display"), false);
+});
+
+test("an author's own display on an inline region is never touched", () => {
+  setupDom(
+    '<!doctype html><html><body><div><span editable style="display: flex">Hello</span></div></body></html>'
+  );
+  const element = document.querySelector("[editable]");
+  new RichClay(element, { Squire: FakeSquire });
+
+  assert.equal(element.style.display, "flex");
+  assert.equal(element.hasAttribute("data-richclay-runtime-display"), false);
+
+  const clone = document.documentElement.cloneNode(true);
+  stripRichClayFromClone(clone);
+  assert.equal(clone.querySelector("[editable]").style.display, "flex");
+});
+
+// richclay's stylesheet carries save-remove, so the containment a <pre> needs to
+// stop a long line running off the published page has to ride the markup.
+test("save-strip writes the <pre> containment style into the saved markup", () => {
+  setupDom(
+    '<!doctype html><html><body><div data-richclay contenteditable="true"><pre>one</pre><p>x</p><pre>two</pre></div></body></html>'
+  );
+  const clone = document.documentElement.cloneNode(true);
+  stripRichClayFromClone(clone);
+
+  const blocks = clone.querySelectorAll("pre");
+  assert.equal(blocks.length, 2);
+  blocks.forEach(pre => {
+    assert.equal(pre.style.boxSizing, "border-box");
+    assert.equal(pre.style.minWidth, "100%");
+    assert.equal(pre.style.overflow, "auto");
+    assert.equal(pre.style.width, "0px");
+  });
+  // the strip ran on the clone, so the live DOM is untouched
+  assert.equal(document.querySelector("pre").hasAttribute("style"), false);
+});
+
+// querySelectorAll never returns the region itself, so a <pre editable> was the
+// one code block the containment missed, and Object.assign overwrote sizing the
+// author had written by hand.
+test("save-strip reaches a root <pre> and leaves the author's own sizing alone", () => {
+  setupDom(
+    '<!doctype html><html><body><pre editable contenteditable="true">code</pre><div data-richclay contenteditable="true"><pre style="width: 50%">two</pre></div></body></html>'
+  );
+  const clone = document.documentElement.cloneNode(true);
+  stripRichClayFromClone(clone);
+
+  const root = clone.querySelector("pre[editable]");
+  assert.equal(root.style.boxSizing, "border-box");
+  assert.equal(root.style.minWidth, "100%");
+  assert.equal(root.style.overflow, "auto");
+  assert.equal(root.style.width, "0px");
+
+  const authored = clone.querySelector("[data-richclay] pre");
+  assert.equal(authored.style.width, "50%");
+  assert.equal(authored.style.boxSizing, "border-box");
+});
+
 test("save-strip keeps empty inline wrappers that carry attributes", () => {
   setupDom('<!doctype html><html><body><div data-richclay contenteditable="true"><p><span class="icon"></span>Text<em></em></p></div></body></html>');
   const clone = document.documentElement.cloneNode(true);

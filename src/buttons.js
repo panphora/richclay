@@ -31,6 +31,8 @@ const icons = {
   blocks: svg(`<line ${S} x1="3" x2="15" y1="4" y2="4"/><line ${S} x1="3" x2="15" y1="9" y2="9"/><line ${S} x1="3" x2="10" y1="14" y2="14"/>`)
 };
 
+const blocksOnly = editor => editor.blocksStayOut();
+
 export const presets = {
   minimal: ["bold", "italic", "link", "unorderedList"],
   inline: [
@@ -107,6 +109,7 @@ export const defaultButtons = [
     icon: icons.link,
     group: "links",
     shortcut: "Mod+K",
+    mutates: false,
     run: editor => editor.openLinkDialog(),
     isActive: editor => editor.selectionHasFormat("A")
   },
@@ -120,16 +123,18 @@ export const defaultButtons = [
   },
   toggle("unorderedList", "Bulleted list", icons.ul, "Mod+Shift+8", "lists",
     editor => editor.toggleList("UL"),
-    editor => editor.pathHas("UL")
+    editor => editor.pathHas("UL"),
+    blocksOnly
   ),
   toggle("orderedList", "Numbered list", icons.ol, "Mod+Shift+9", "lists",
     editor => editor.toggleList("OL"),
-    editor => editor.pathHas("OL")
+    editor => editor.pathHas("OL"),
+    blocksOnly
   ),
   toggle("quote", "Quote", icons.quote, null, "blocks", editor => {
     if (editor.pathHas("BLOCKQUOTE")) return editor.squire.decreaseQuoteLevel();
     return editor.squire.increaseQuoteLevel();
-  }, editor => editor.pathHas("BLOCKQUOTE")),
+  }, editor => editor.pathHas("BLOCKQUOTE"), blocksOnly),
   {
     id: "outdent",
     label: "Outdent",
@@ -137,6 +142,7 @@ export const defaultButtons = [
     icon: icons.outdent,
     group: "blocks",
     shortcut: "Mod+[",
+    isDisabled: blocksOnly,
     run: editor => editor.outdent()
   },
   {
@@ -146,6 +152,7 @@ export const defaultButtons = [
     icon: icons.indent,
     group: "blocks",
     shortcut: "Mod+]",
+    isDisabled: blocksOnly,
     run: editor => editor.indent()
   },
   {
@@ -155,6 +162,7 @@ export const defaultButtons = [
     icon: icons.undo,
     group: "history",
     shortcut: "Mod+Z",
+    mutates: false,
     run: editor => editor.squire.undo()
   },
   {
@@ -164,6 +172,7 @@ export const defaultButtons = [
     icon: icons.redo,
     group: "history",
     shortcut: "Mod+Shift+Z",
+    mutates: false,
     run: editor => editor.squire.redo()
   },
   {
@@ -181,6 +190,7 @@ export const defaultButtons = [
     ariaLabel: "Choose block style",
     icon: icons.blocks,
     group: "blocks",
+    isDisabled: blocksOnly,
     options: [
       blockOption("Paragraph", "P"),
       blockOption("Heading 1", "H1"),
@@ -189,12 +199,14 @@ export const defaultButtons = [
       {
         label: "Quote",
         value: "BLOCKQUOTE",
+        isDisabled: blocksOnly,
         run: editor => editor.squire.increaseQuoteLevel(),
         isActive: editor => editor.pathHas("BLOCKQUOTE")
       },
       {
         label: "Code block",
         value: "PRE",
+        isDisabled: blocksOnly,
         run: editor => editor.setBlockType("PRE"),
         isActive: editor => editor.pathHas("PRE")
       }
@@ -202,7 +214,7 @@ export const defaultButtons = [
   }
 ];
 
-function toggle(id, label, icon, shortcut, group, run, isActive = editor => editor.selectionHasFormat(labelTag(id))) {
+function toggle(id, label, icon, shortcut, group, run, isActive = editor => editor.selectionHasFormat(labelTag(id)), isDisabled) {
   return {
     id,
     label,
@@ -210,6 +222,7 @@ function toggle(id, label, icon, shortcut, group, run, isActive = editor => edit
     icon,
     group,
     shortcut,
+    isDisabled,
     run,
     isActive
   };
@@ -228,6 +241,7 @@ function blockOption(label, tag) {
   return {
     label,
     value: tag,
+    isDisabled: blocksOnly,
     run: editor => editor.setBlockType(tag),
     isActive: editor => editor.pathHas(tag)
   };

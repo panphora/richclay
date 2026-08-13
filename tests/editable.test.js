@@ -217,16 +217,20 @@ test("the floating toolbar is stripped from saves", () => {
   assert.equal(clone.querySelector("[data-richclay-toolbar]"), null);
 });
 
-test("single-line editors do not bind block-command shortcuts", () => {
+// Not installing richclay's own binding is what leaves Squire's inherited handler
+// in charge, so the block keys are masked with an own null rather than skipped.
+test("single-line editors mask the block-command shortcuts", () => {
   setupDom('<!doctype html><html><body><h1 editable="single-line">T</h1></body></html>');
   const editor = new RichClay(document.querySelector("[editable]"), { Squire: FakeSquire });
-  const keys = editor.squire.commands
-    .filter(c => Array.isArray(c) && c[0] === "shortcut")
-    .map(c => c[1]);
-  assert.equal(keys.includes("Ctrl-b"), true);
-  assert.equal(keys.includes("Ctrl-Shift-8"), false);
-  assert.equal(keys.includes("Ctrl-Shift-9"), false);
-  assert.equal(keys.includes("Ctrl-]"), false);
+  const bindings = new Map(
+    editor.squire.commands
+      .filter(c => Array.isArray(c) && c[0] === "shortcut")
+      .map(c => [c[1], c[2]])
+  );
+  assert.equal(typeof bindings.get("Ctrl-b"), "function");
+  ["Ctrl-Shift-8", "Ctrl-Shift-9", "Ctrl-]", "Ctrl-["].forEach(key => {
+    assert.equal(bindings.get(key), null, key);
+  });
 });
 
 test("registerButton on a focused inline editor rebuilds the floating toolbar", () => {
