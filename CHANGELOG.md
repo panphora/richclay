@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1] - 2026-08-14
+
+### Changed
+- Update richclay
+
+
+
 ## [0.2.0] - 2026-08-12
 
 ### Added
