@@ -48,7 +48,8 @@
     "build": "npm run build:global && npm run build:vendor",
     "vendor:squire": "node scripts/vendor-squire.mjs",
     "propagate": "npm run build && node scripts/propagate.js",
-    "copy-to-hyperclayjs": "npm run propagate",
+    "copy-to-hyperclayjs": "npm run build && node scripts/propagate.js --only hyperclayjs",
+    "copy-to-clayjs": "npm run build && node scripts/propagate.js --only clayjs",
     "prepublishOnly": "npm run build:global",
     "pretest": "npm run build",
     "test": "node --test tests/*.test.js"

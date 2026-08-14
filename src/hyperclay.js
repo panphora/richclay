@@ -14,22 +14,34 @@ const runtimeClasses = [
 
 const installedWindows = new WeakSet();
 
-// Two clients provide this API and they spell three things differently. hyperclayjs
-// owns window.hyperclay; clayjs owns window.clay and renamed the save transform to
-// addDocumentTransform. Reading `clay ?? hyperclay` as one namespace would resolve to
-// clay and then find no beforeSave, so richclay would silently stop stripping its own
-// chrome and every save would write toolbars into the author's file. Hence per
-// capability rather than per namespace.
-function hasPlatform(win) {
-  return Boolean(win.clay || win.hyperclay);
-}
-
 function platformEditMode(win) {
   if (typeof win.clay?.isEditMode === "boolean") return win.clay.isEditMode;
   if (typeof win.hyperclay?.isEditMode === "boolean") return win.hyperclay.isEditMode;
   return null;
 }
 
+// A bare namespace object proves nothing: every clayjs satellite creates
+// window.clay for its own bookkeeping, and <div id="clay"> makes one via named
+// window access. What distinguishes a real core is its lifecycle contract.
+function hasPlatformLifecycle(win) {
+  const hasReady = [win.clay?.ready, win.hyperclay?.ready]
+    .some(ready => ready && typeof ready.then === "function");
+  const modules = win.hyperclayModules;
+  const legacyHyperclayLoader =
+    win.__hyperclayNoAutoExport === false &&
+    modules &&
+    typeof modules === "object" &&
+    typeof modules.nodeType !== "number";
+
+  return platformEditMode(win) !== null || hasReady || Boolean(legacyHyperclayLoader);
+}
+
+// Two clients provide this API and they spell three things differently. hyperclayjs
+// owns window.hyperclay; clayjs owns window.clay and renamed the save transform to
+// addDocumentTransform. Reading `clay ?? hyperclay` as one namespace would resolve to
+// clay and then find no beforeSave, so richclay would silently stop stripping its own
+// chrome and every save would write toolbars into the author's file. Hence per
+// capability rather than per namespace.
 function platformDocumentTransform(win) {
   return win.clay?.addDocumentTransform || win.hyperclay?.beforeSave || null;
 }
@@ -49,7 +61,7 @@ const PRE_CONTAINMENT = {
 export function shouldUseHyperclay(options = {}, win = window) {
   if (options.hyperclay === false) return false;
   if (options.hyperclay === true) return true;
-  return Boolean(hasPlatform(win) || hasEditmodeSignal(win));
+  return Boolean(hasPlatformLifecycle(win) || hasEditmodeSignal(win));
 }
 
 export function isHyperclayEditMode(win = window) {

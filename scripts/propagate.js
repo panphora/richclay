@@ -24,21 +24,42 @@ export const RichClay = richclay.default;
 export default richclay.default;
 `
 
-// Every copy of richclay in the workspace, in one list. A fix that reaches one
+// Every copy of richclay in the workspace, in one table. A fix that reaches one
 // destination and not the other is how a whole bug class stayed invisible: the
 // clayjs copy was refreshed by hand while this script wrote only hyperclayjs.
 // A missing path is a failure, not a destination to skip quietly.
+//
+// `--only <client>` narrows the table to one client's destinations; `--check`
+// writes nothing and exits 1 naming every destination that is missing or stale.
+// Each client owns its own vendor copy AND the website that ships it, so a
+// release of one client never writes into the other's tree.
 const DESTINATIONS = [
-  { path: 'clayjs/src/vendor/richclay.vendor.js', form: 'vendor' },
-  { path: 'hyperclayjs/src/vendor/richclay.vendor.js', form: 'vendor' },
-  { path: 'clayjs/website/vendor/richclay.min.js', form: 'bundle' },
-  { path: 'hyperclay-actual-website/assets/vendor/richclay.min.js', form: 'bundle' }
+  { client: 'clayjs', path: 'clayjs/src/vendor/richclay.vendor.js', form: 'vendor' },
+  { client: 'hyperclayjs', path: 'hyperclayjs/src/vendor/richclay.vendor.js', form: 'vendor' },
+  { client: 'clayjs', path: 'clayjs/website/vendor/richclay.min.js', form: 'bundle' },
+  { client: 'hyperclayjs', path: 'hyperclay-actual-website/assets/vendor/richclay.min.js', form: 'bundle' }
 ]
 
-const isCheck = process.argv.includes('--check')
+const args = process.argv.slice(2)
+const isCheck = args.includes('--check')
+const onlyIndex = args.indexOf('--only')
+const only = onlyIndex === -1 ? null : args[onlyIndex + 1]
+
+const clients = [...new Set(DESTINATIONS.map(destination => destination.client))]
+
+if (onlyIndex !== -1 && !only) {
+  console.error(`Error: --only needs a client name. Known clients: ${clients.join(', ')}.`)
+  process.exit(1)
+}
+
+const targets = only ? DESTINATIONS.filter(destination => destination.client === only) : DESTINATIONS
+
+if (!targets.length) {
+  console.error(`Error: no destination for client "${only}". Known clients: ${clients.join(', ')}.`)
+  process.exit(1)
+}
 
 if (!fs.existsSync(distFile)) {
-  if (isCheck) process.exit(1)
   console.error('Error: dist/richclay.min.js not found. Run "npm run build" first.')
   process.exit(1)
 }
@@ -47,15 +68,21 @@ const bundle = fs.readFileSync(distFile, 'utf8')
 const contentFor = form => (form === 'vendor' ? `${bundle.trim()}\n${WRAPPER_CODE}` : bundle)
 
 if (isCheck) {
-  const stale = DESTINATIONS.some(destination => {
+  const stale = targets.filter(destination => {
     const file = path.join(workspace, destination.path)
     if (!fs.existsSync(file)) return true
     return fs.readFileSync(file, 'utf8') !== contentFor(destination.form)
   })
-  process.exit(stale ? 1 : 0)
+  stale.forEach(destination => {
+    const file = path.join(workspace, destination.path)
+    console.error(`✗ ${fs.existsSync(file) ? 'stale' : 'missing'}: ${destination.path}`)
+  })
+  if (stale.length) process.exit(1)
+  targets.forEach(destination => console.log(`✓ in sync ${destination.path}`))
+  process.exit(0)
 }
 
-const missing = DESTINATIONS.filter(
+const missing = targets.filter(
   destination => !fs.existsSync(path.dirname(path.join(workspace, destination.path)))
 )
 if (missing.length) {
@@ -66,7 +93,7 @@ if (missing.length) {
   process.exit(1)
 }
 
-DESTINATIONS.forEach(destination => {
+targets.forEach(destination => {
   fs.writeFileSync(path.join(workspace, destination.path), contentFor(destination.form), 'utf8')
   console.log(`✓ Updated ${destination.path}`)
 })

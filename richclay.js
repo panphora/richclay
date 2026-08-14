@@ -541,13 +541,16 @@ var RichClayBundle = (() => {
     "richclay-focused"
   ];
   var installedWindows = /* @__PURE__ */ new WeakSet();
-  function hasPlatform(win) {
-    return Boolean(win.clay || win.hyperclay);
-  }
   function platformEditMode(win) {
     if (typeof win.clay?.isEditMode === "boolean") return win.clay.isEditMode;
     if (typeof win.hyperclay?.isEditMode === "boolean") return win.hyperclay.isEditMode;
     return null;
+  }
+  function hasPlatformLifecycle(win) {
+    const hasReady = [win.clay?.ready, win.hyperclay?.ready].some((ready) => ready && typeof ready.then === "function");
+    const modules = win.hyperclayModules;
+    const legacyHyperclayLoader = win.__hyperclayNoAutoExport === false && modules && typeof modules === "object" && typeof modules.nodeType !== "number";
+    return platformEditMode(win) !== null || hasReady || Boolean(legacyHyperclayLoader);
   }
   function platformDocumentTransform(win) {
     return win.clay?.addDocumentTransform || win.hyperclay?.beforeSave || null;
@@ -561,7 +564,7 @@ var RichClayBundle = (() => {
   function shouldUseHyperclay(options = {}, win = window) {
     if (options.hyperclay === false) return false;
     if (options.hyperclay === true) return true;
-    return Boolean(hasPlatform(win) || hasEditmodeSignal(win));
+    return Boolean(hasPlatformLifecycle(win) || hasEditmodeSignal(win));
   }
   function isHyperclayEditMode(win = window) {
     const fromQuery = readEditmodeParam(win);

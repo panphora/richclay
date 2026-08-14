@@ -5,6 +5,7 @@ import RichClay from "../src/richclay.js";
 import {
   stripRichClayFromClone,
   shouldUseHyperclay,
+  shouldActivateEditor,
   isHyperclayEditMode,
   consumeInertContenteditable
 } from "../src/hyperclay.js";
@@ -189,12 +190,148 @@ test("isHyperclayEditMode resolves the edit-mode signal in priority order", () =
   assert.equal(isHyperclayEditMode({ location: { search: "" }, document: { cookie: "" } }), false);
 });
 
-// clayjs is the second client. It publishes window.clay and calls the save transform
-// addDocumentTransform, so a resolver that only knows window.hyperclay finds nothing,
-// returns without registering, and richclay writes its own toolbars into every saved
-// file with nothing thrown and nothing logged.
-test("shouldUseHyperclay sees a page carrying only window.clay", () => {
-  assert.equal(shouldUseHyperclay({}, { clay: {}, location: { search: "" }, document: { cookie: "" } }), true);
+// A bare namespace object is not a platform. Every clayjs satellite creates
+// window.clay for its own bookkeeping, and <div id="clay"> creates one through named
+// window access, so treating truthiness as the verdict hands the page to a lifecycle
+// that will never arrive: shouldActivateEditor stops returning true for a standalone
+// file, and autoInit's gate never opens. What identifies a real core is its lifecycle
+// contract, which is why clayjs publishes clay.ready and hyperclayjs now publishes
+// hyperclay.ready.
+test("a bare namespace object is not a platform, and neither is an element wearing the name", () => {
+  const win = extra => ({ location: { search: "" }, document: { cookie: "" }, ...extra });
+
+  assert.equal(shouldUseHyperclay({}, win({ clay: {} })), false);
+  assert.equal(shouldUseHyperclay({}, win({ hyperclay: {} })), false);
+  // <div id="clay"> reaches window.clay through named access.
+  assert.equal(shouldUseHyperclay({}, win({ clay: { nodeType: 1, tagName: "DIV" } })), false);
+  // and <div id="hyperclayModules"> is what the loader's module registry would be
+  // mistaken for, so the legacy-loader arm rejects anything with a numeric nodeType.
+  assert.equal(
+    shouldUseHyperclay({}, win({
+      __hyperclayNoAutoExport: false,
+      hyperclayModules: { nodeType: 1, tagName: "DIV" }
+    })),
+    false
+  );
+});
+
+test("a lifecycle contract is a platform, under either client's name", () => {
+  const win = extra => ({ location: { search: "" }, document: { cookie: "" }, ...extra });
+  const pending = () => new Promise(() => {});
+
+  // Unresolved is the point: the promise exists from the moment the core evaluates,
+  // long before it publishes isEditMode or any optional plugin.
+  assert.equal(shouldUseHyperclay({}, win({ clay: { ready: pending() } })), true);
+  assert.equal(shouldUseHyperclay({}, win({ hyperclay: { ready: pending() } })), true);
+  // A published verdict is a lifecycle too, and it is what a core reaches eventually.
+  assert.equal(shouldUseHyperclay({}, win({ clay: { isEditMode: true } })), true);
+  assert.equal(shouldUseHyperclay({}, win({ hyperclay: { isEditMode: false } })), true);
+  // The rollout window: a new richclay bundle against a published hyperclayjs whose
+  // loader has no ready yet. export-to-window flipping the flag is the marker.
+  assert.equal(
+    shouldUseHyperclay({}, win({
+      __hyperclayNoAutoExport: false,
+      hyperclayModules: {},
+      hyperclay: { Mutation: {} }
+    })),
+    true
+  );
+});
+
+test("a platform in edit mode still activates the editors", () => {
+  const win = {
+    location: { search: "" },
+    document: { cookie: "" },
+    clay: { isEditMode: true, addDocumentTransform() {} }
+  };
+
+  assert.equal(shouldUseHyperclay({}, win), true);
+  assert.equal(isHyperclayEditMode(win), true);
+  assert.equal(shouldActivateEditor({}, win), true);
+});
+
+// The activation matrix, every page shape richclay can land on, in one table. Two
+// consumers read the same pair of predicates with opposite polarity: a direct
+// `new RichClay(...)` treats "no platform" as permission to edit (shouldActivateEditor
+// returns true), while autoInit mounts nothing at all unless BOTH shouldUseHyperclay
+// and isHyperclayEditMode are true. So a wrong verdict does not merely downgrade a
+// page, it can take the owner's editors away entirely, and only a table that carries
+// both columns can see that happen.
+const PAGE_SHAPES = [
+  // [label, win, shouldUse, isEditMode, direct new RichClay(...), autoInit mounts]
+  ["bare HTML file, no client",
+    {}, false, false, true, false],
+
+  ["clayjs satellite only (window.clay = {})",
+    { clay: {} }, false, false, true, false],
+
+  ['<div id="clay"> named window access (element, not object)',
+    { clay: { nodeType: 1, tagName: "DIV" } }, false, false, true, false],
+
+  ["clayjs core, EDIT mode",
+    { __hyperclayEditMode: true, clay: { isEditMode: true } }, true, true, true, true],
+
+  ["clayjs core, VIEW mode",
+    { __hyperclayEditMode: false, clay: { isEditMode: false } }, true, false, false, false],
+
+  ["clayjs core evaluated, isEditMode not published yet, owner cookie present",
+    { clay: { ready: "pending" }, cookie: "isAdminOfCurrentResource=1" }, true, true, true, true],
+
+  ["hyperclayjs core evaluated, isEditMode not published yet, owner cookie present",
+    { hyperclay: { ready: "pending", Mutation: {} }, cookie: "isAdminOfCurrentResource=1" },
+    true, true, true, true],
+
+  ["hyperclayjs VISITOR, richclay force-loaded, core evaluated",
+    { hyperclay: { ready: "pending", Mutation: {} } }, true, false, false, false],
+
+  ["rollout window: published hyperclayjs with no ready, owner cookie present",
+    { __hyperclayNoAutoExport: false, hyperclayModules: {}, hyperclay: { Mutation: {} }, cookie: "isAdminOfCurrentResource=1" },
+    true, true, true, true],
+
+  ["rollout window: published hyperclayjs with no ready, VISITOR",
+    { __hyperclayNoAutoExport: false, hyperclayModules: {}, hyperclay: { Mutation: {} } },
+    true, false, false, false],
+
+  ["htmlclay / self-saving file that opts in via __hyperclayEditMode = true",
+    { __hyperclayEditMode: true }, true, true, true, true],
+
+  ["?editmode=false beats everything",
+    { search: "?editmode=false", hyperclay: { isEditMode: true }, cookie: "isAdminOfCurrentResource=1" },
+    true, false, false, false],
+
+  ["standalone file served from hyperclay.com while the owner cookie happens to be set",
+    { cookie: "isAdminOfCurrentResource=1" }, false, true, true, false]
+];
+
+const buildPageShape = ({ search, cookie, ...rest }) => {
+  const win = { location: { search: search || "" }, document: { cookie: cookie || "" }, ...rest };
+  // A pending promise, spelled in the table as a string so the table stays readable.
+  for (const namespace of [win.clay, win.hyperclay]) {
+    if (namespace?.ready === "pending") namespace.ready = new Promise(() => {});
+  }
+  return win;
+};
+
+test("every page shape resolves to the intended activation", () => {
+  PAGE_SHAPES.forEach(([label, shape, wantUse, wantEditMode, wantDirect, wantAutoInit]) => {
+    const win = buildPageShape(shape);
+    const use = shouldUseHyperclay({}, win);
+    const editMode = isHyperclayEditMode(win);
+
+    assert.equal(use, wantUse, `shouldUseHyperclay: ${label}`);
+    assert.equal(editMode, wantEditMode, `isHyperclayEditMode: ${label}`);
+    assert.equal(shouldActivateEditor({}, win), wantDirect, `new RichClay(...): ${label}`);
+    assert.equal(use && editMode, wantAutoInit, `autoInit mounts: ${label}`);
+  });
+});
+
+test("an explicit hyperclay option still overrides every page shape", () => {
+  const win = buildPageShape({});
+  assert.equal(shouldUseHyperclay({ hyperclay: true }, win), true);
+  assert.equal(
+    shouldUseHyperclay({ hyperclay: false }, buildPageShape({ clay: { isEditMode: true } })),
+    false
+  );
 });
 
 test("isHyperclayEditMode reads win.clay.isEditMode, and a false there outranks the cookie", () => {
