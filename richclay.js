@@ -541,16 +541,22 @@ var RichClayBundle = (() => {
     "richclay-focused"
   ];
   var installedWindows = /* @__PURE__ */ new WeakSet();
+  var armedWindows = /* @__PURE__ */ new WeakSet();
+  var PLATFORM_READY = ["clay:ready", "hyperclay:ready"];
+  function platformReadyPromise(win) {
+    return [win.clay?.ready, win.hyperclay?.ready].find(
+      (ready) => ready && typeof ready.then === "function"
+    ) || null;
+  }
   function platformEditMode(win) {
     if (typeof win.clay?.isEditMode === "boolean") return win.clay.isEditMode;
     if (typeof win.hyperclay?.isEditMode === "boolean") return win.hyperclay.isEditMode;
     return null;
   }
   function hasPlatformLifecycle(win) {
-    const hasReady = [win.clay?.ready, win.hyperclay?.ready].some((ready) => ready && typeof ready.then === "function");
     const modules = win.hyperclayModules;
     const legacyHyperclayLoader = win.__hyperclayNoAutoExport === false && modules && typeof modules === "object" && typeof modules.nodeType !== "number";
-    return platformEditMode(win) !== null || hasReady || Boolean(legacyHyperclayLoader);
+    return platformEditMode(win) !== null || Boolean(platformReadyPromise(win)) || Boolean(legacyHyperclayLoader);
   }
   function platformDocumentTransform(win) {
     return win.clay?.addDocumentTransform || win.hyperclay?.beforeSave || null;
@@ -597,9 +603,30 @@ var RichClayBundle = (() => {
   function installHyperclayBridge(win = window) {
     if (installedWindows.has(win)) return;
     const addDocumentTransform = platformDocumentTransform(win);
-    if (typeof addDocumentTransform !== "function") return;
+    if (typeof addDocumentTransform !== "function") {
+      armBridgeRetry(win);
+      return;
+    }
     addDocumentTransform((docElem) => stripRichClayFromClone(docElem));
     installedWindows.add(win);
+  }
+  function armBridgeRetry(win) {
+    if (armedWindows.has(win)) return;
+    const doc = win.document;
+    const ready = platformReadyPromise(win);
+    if (!doc && !ready) return;
+    armedWindows.add(win);
+    const retry = () => {
+      installHyperclayBridge(win);
+      if (installedWindows.has(win)) disarm();
+    };
+    const disarm = () => {
+      if (!doc) return;
+      PLATFORM_READY.forEach((name) => doc.removeEventListener(name, retry));
+    };
+    if (doc) PLATFORM_READY.forEach((name) => doc.addEventListener(name, retry));
+    if (ready) ready.then(retry, () => {
+    });
   }
   function stripRichClayFromClone(docElem) {
     docElem.querySelectorAll?.(CHROME_SELECTOR).forEach((node) => node.remove());

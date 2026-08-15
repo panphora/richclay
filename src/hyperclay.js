@@ -13,6 +13,18 @@ const runtimeClasses = [
 ];
 
 const installedWindows = new WeakSet();
+const armedWindows = new WeakSet();
+
+// Both clients dispatch the same moment under different names.
+const PLATFORM_READY = ["clay:ready", "hyperclay:ready"];
+
+function platformReadyPromise(win) {
+  return (
+    [win.clay?.ready, win.hyperclay?.ready].find(
+      ready => ready && typeof ready.then === "function"
+    ) || null
+  );
+}
 
 function platformEditMode(win) {
   if (typeof win.clay?.isEditMode === "boolean") return win.clay.isEditMode;
@@ -24,8 +36,6 @@ function platformEditMode(win) {
 // window.clay for its own bookkeeping, and <div id="clay"> makes one via named
 // window access. What distinguishes a real core is its lifecycle contract.
 function hasPlatformLifecycle(win) {
-  const hasReady = [win.clay?.ready, win.hyperclay?.ready]
-    .some(ready => ready && typeof ready.then === "function");
   const modules = win.hyperclayModules;
   const legacyHyperclayLoader =
     win.__hyperclayNoAutoExport === false &&
@@ -33,7 +43,11 @@ function hasPlatformLifecycle(win) {
     typeof modules === "object" &&
     typeof modules.nodeType !== "number";
 
-  return platformEditMode(win) !== null || hasReady || Boolean(legacyHyperclayLoader);
+  return (
+    platformEditMode(win) !== null ||
+    Boolean(platformReadyPromise(win)) ||
+    Boolean(legacyHyperclayLoader)
+  );
 }
 
 // Two clients provide this API and they spell three things differently. hyperclayjs
@@ -103,10 +117,41 @@ export function parseEditableOptions(element) {
 export function installHyperclayBridge(win = window) {
   if (installedWindows.has(win)) return;
   const addDocumentTransform = platformDocumentTransform(win);
-  if (typeof addDocumentTransform !== "function") return;
+  if (typeof addDocumentTransform !== "function") {
+    armBridgeRetry(win);
+    return;
+  }
 
   addDocumentTransform(docElem => stripRichClayFromClone(docElem));
   installedWindows.add(win);
+}
+
+// hyperclayjs publishes the transform from deep in its core waterfall while
+// richclay arrives as one flat vendor bundle, and a flat bundle always resolves
+// before a multi-level waterfall, so this first read reliably misses. Nothing
+// constructs a region again afterwards, so with no retry the bridge never installs
+// and every save writes richclay's chrome into the author's file. clayjs is immune
+// by construction, assembling addDocumentTransform before any plugin import; the
+// readiness pair is the signal hyperclayjs added for exactly this handshake.
+function armBridgeRetry(win) {
+  if (armedWindows.has(win)) return;
+  const doc = win.document;
+  const ready = platformReadyPromise(win);
+  if (!doc && !ready) return;
+  armedWindows.add(win);
+
+  const retry = () => {
+    installHyperclayBridge(win);
+    if (installedWindows.has(win)) disarm();
+  };
+  const disarm = () => {
+    if (!doc) return;
+    PLATFORM_READY.forEach(name => doc.removeEventListener(name, retry));
+  };
+
+  if (doc) PLATFORM_READY.forEach(name => doc.addEventListener(name, retry));
+  // A loader that never settles must not surface as an unhandled rejection.
+  if (ready) ready.then(retry, () => {});
 }
 
 export function stripRichClayFromClone(docElem) {

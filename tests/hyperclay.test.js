@@ -4,6 +4,7 @@ import { setupDom, FakeSquire } from "./helpers.js";
 import RichClay from "../src/richclay.js";
 import {
   stripRichClayFromClone,
+  installHyperclayBridge,
   shouldUseHyperclay,
   shouldActivateEditor,
   isHyperclayEditMode,
@@ -850,4 +851,76 @@ test("save-strip keeps empty inline wrappers that carry attributes", () => {
   const editor = clone.querySelector("[data-richclay]");
   assert.equal(editor.querySelector("span.icon") !== null, true);
   assert.equal(editor.querySelector("em"), null);
+});
+
+const BRIDGE_PAGE = `<!doctype html><html><body>
+  <p editable data-richclay-active="true" class="richclay-inline richclay-active"
+     contenteditable="true" data-richclay-runtime-contenteditable="true">hi</p>
+</body></html>`;
+
+test("save bridge installs on the readiness event when the transform arrives late", () => {
+  setupDom(BRIDGE_PAGE);
+  const registered = [];
+  window.hyperclay = {};
+
+  installHyperclayBridge(window);
+  assert.equal(registered.length, 0);
+
+  window.hyperclay.beforeSave = fn => registered.push(fn);
+  document.dispatchEvent(new CustomEvent("hyperclay:ready"));
+  assert.equal(registered.length, 1);
+
+  const clone = document.documentElement.cloneNode(true);
+  registered[0](clone);
+  const region = clone.querySelector("[editable]");
+  assert.equal(region.hasAttribute("contenteditable"), false);
+  assert.equal(region.hasAttribute("data-richclay-active"), false);
+  assert.equal(region.textContent, "hi");
+});
+
+test("save bridge installs on the clay readiness event too", () => {
+  setupDom(BRIDGE_PAGE);
+  const registered = [];
+  window.clay = {};
+
+  installHyperclayBridge(window);
+  assert.equal(registered.length, 0);
+
+  window.clay.addDocumentTransform = fn => registered.push(fn);
+  document.dispatchEvent(new CustomEvent("clay:ready"));
+  assert.equal(registered.length, 1);
+});
+
+test("save bridge installs off the readiness promise when no event fires", async () => {
+  setupDom(BRIDGE_PAGE);
+  const registered = [];
+  let settle;
+  window.hyperclay = { ready: new Promise(resolve => { settle = resolve; }) };
+
+  installHyperclayBridge(window);
+  assert.equal(registered.length, 0);
+
+  window.hyperclay.beforeSave = fn => registered.push(fn);
+  settle();
+  await window.hyperclay.ready;
+  await Promise.resolve();
+  assert.equal(registered.length, 1);
+});
+
+test("a late transform is registered exactly once across repeat calls and both signals", async () => {
+  setupDom(BRIDGE_PAGE);
+  const registered = [];
+  let settle;
+  window.hyperclay = { ready: new Promise(resolve => { settle = resolve; }) };
+
+  installHyperclayBridge(window);
+  installHyperclayBridge(window);
+
+  window.hyperclay.beforeSave = fn => registered.push(fn);
+  document.dispatchEvent(new CustomEvent("hyperclay:ready"));
+  document.dispatchEvent(new CustomEvent("hyperclay:ready"));
+  settle();
+  await window.hyperclay.ready;
+  await Promise.resolve();
+  assert.equal(registered.length, 1);
 });
