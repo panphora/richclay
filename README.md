@@ -1,6 +1,6 @@
 # richclay
 
-`richclay` is a small, no-build rich text editor for Hyperclay-style malleable HTML. It wraps Squire for editing commands and undo/redo, uses DOMPurify for sanitization, and treats the editable element's live DOM as the document source of truth.
+`richclay` is a small, no-build rich text editor for Hyperclay™-style malleable HTML. It wraps Squire for editing commands and undo/redo, uses DOMPurify for sanitization, and treats the editable element's live DOM as the document source of truth.
 
 The generated toolbar, dialogs, live regions, runtime classes, and `contenteditable` state are editor chrome. They are added only while editing and stripped before Hyperclay serializes the page.
 
@@ -293,3 +293,10 @@ npm run build
 ```
 
 `npm install` is for development only. The shipped library path works offline from checked-in files. `npm run build` regenerates the classic-script `richclay.js` from `src/browser-global.js`.
+
+## License
+
+Our code is MIT-0 (MIT No Attribution): use it, remix it, ship it, no attribution
+needed. richclay wraps Squire (MIT) and DOMPurify (Apache-2.0 OR MPL-2.0), which
+keep their own licenses; see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) and
+the license files in vendor/.
