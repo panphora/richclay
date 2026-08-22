@@ -36,7 +36,6 @@ export default richclay.default;
 const DESTINATIONS = [
   { client: 'clayjs', path: 'clayjs/src/vendor/richclay.vendor.js', form: 'vendor' },
   { client: 'hyperclayjs', path: 'hyperclayjs/src/vendor/richclay.vendor.js', form: 'vendor' },
-  { client: 'clayjs', path: 'clayjs/website/vendor/richclay.min.js', form: 'bundle' },
   { client: 'hyperclayjs', path: 'hyperclay-actual-website/assets/vendor/richclay.min.js', form: 'bundle' }
 ]
 
