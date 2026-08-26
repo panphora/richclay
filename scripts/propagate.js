@@ -31,12 +31,11 @@ export default richclay.default;
 //
 // `--only <client>` narrows the table to one client's destinations; `--check`
 // writes nothing and exits 1 naming every destination that is missing or stale.
-// Each client owns its own vendor copy AND the website that ships it, so a
-// release of one client never writes into the other's tree.
+// Each client owns its own vendor copy, so a release of one client never
+// writes into the other's tree.
 const DESTINATIONS = [
   { client: 'clayjs', path: 'clayjs/src/vendor/richclay.vendor.js', form: 'vendor' },
-  { client: 'hyperclayjs', path: 'hyperclayjs/src/vendor/richclay.vendor.js', form: 'vendor' },
-  { client: 'hyperclayjs', path: 'hyperclay-actual-website/assets/vendor/richclay.min.js', form: 'bundle' }
+  { client: 'hyperclayjs', path: 'hyperclayjs/src/vendor/richclay.vendor.js', form: 'vendor' }
 ]
 
 const args = process.argv.slice(2)
