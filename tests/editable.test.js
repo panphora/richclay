@@ -304,3 +304,141 @@ test("a bare author contenteditable attribute round-trips like contenteditable=t
   editor.destroy();
   assert.equal(element.hasAttribute("contenteditable"), true);
 });
+
+test("a custom element carrying a bare editable attribute is left alone", () => {
+  setupDom('<!doctype html><html><body><my-grid editable><p>rows</p></my-grid><h1 editable>title</h1></body></html>');
+  const editors = RichClay.init(undefined, { Squire: FakeSquire });
+
+  const custom = document.querySelector("my-grid");
+  const heading = document.querySelector("h1");
+  assert.equal(editors.length, 1);
+  assert.equal(editors[0].element, heading);
+  assert.equal(custom.getAttribute("data-richclay-active"), null);
+  assert.equal(custom.getAttribute("contenteditable"), null);
+});
+
+test("a custom element opts in with clay-editable", () => {
+  setupDom('<!doctype html><html><body><my-note clay-editable><p>text</p></my-note></body></html>');
+  const editors = RichClay.init(undefined, { Squire: FakeSquire });
+
+  assert.equal(editors.length, 1);
+  assert.equal(editors[0].element, document.querySelector("my-note"));
+});
+
+test("clay-editable is an alias, down to the options and the author's markup", () => {
+  setupDom('<!doctype html><html><body><section clay-editable><p class="lead" data-x="1">Hi <img src="a.png" alt=""><em>there</em></p></section></body></html>');
+  const element = document.querySelector("section");
+  const before = element.innerHTML;
+  const editors = RichClay.init(undefined, { Squire: FakeSquire });
+
+  assert.equal(editors.length, 1);
+  assert.equal(editors[0].element, element);
+  // The whole point of the escape hatch. A spelling that mounts the card editor
+  // runs its sanitizer over the live DOM here and takes the class, the data
+  // attribute and the image with it, which is the damage this release prevents.
+  assert.equal(editors[0].options.inline, true);
+  assert.equal(element.innerHTML, before);
+  assert.equal(element.classList.contains("richclay-inline"), true);
+  assert.equal(element.classList.contains("richclay-editor"), false);
+});
+
+test("clay-editable carries the same option tokens as editable", () => {
+  setupDom('<!doctype html><html><body><h1 clay-editable="single-line toolbar-on-select">Title</h1></body></html>');
+  const el = document.querySelector("h1");
+  assert.deepEqual(parseEditableOptions(el), {
+    inline: true,
+    singleLine: true,
+    toolbarOnSelect: true
+  });
+
+  const editor = new RichClay(el, { Squire: FakeSquire });
+  assert.equal(editor.options.singleLine, true);
+  el.innerHTML = "<div>one</div><div>two</div>";
+  const clone = document.documentElement.cloneNode(true);
+  stripRichClayFromClone(clone);
+  assert.equal(clone.querySelector("h1").innerHTML, "one two");
+});
+
+test("watch() follows clay-editable in both directions", async () => {
+  setupDom('<!doctype html><html><body><section><p>text</p></section></body></html>', "https://example.test/?editmode=true");
+  window.hyperclay = { isEditMode: true, beforeSave() {} };
+  RichClay.watch(window, { Squire: FakeSquire });
+
+  const el = document.querySelector("section");
+  el.setAttribute("clay-editable", "");
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(el.getAttribute("contenteditable"), "true");
+
+  el.removeAttribute("clay-editable");
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(el.hasAttribute("contenteditable"), false);
+  assert.equal(el.classList.contains("richclay-inline"), false);
+  assert.equal(el.hasAttribute("data-richclay-active"), false);
+});
+
+test("watch() unmounts a custom element whose opt-in marker is removed", async () => {
+  setupDom('<!doctype html><html><body><my-grid editable><p>rows</p></my-grid></body></html>', "https://example.test/?editmode=true");
+  window.hyperclay = { isEditMode: true, beforeSave() {} };
+  const grid = document.querySelector("my-grid");
+  RichClay.init("my-grid", { Squire: FakeSquire });
+  RichClay.watch(window, { Squire: FakeSquire });
+
+  // The marker is the opt-in. Removing it has to tear the editor down: the bare
+  // `editable` beside it still matches the selector, so deciding by the selector
+  // alone left the element mounted and saved its chrome into the author's file.
+  grid.removeAttribute("data-richclay");
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(grid.hasAttribute("contenteditable"), false);
+  assert.equal(grid.hasAttribute("data-richclay-active"), false);
+  assert.equal(grid.classList.contains("richclay-inline"), false);
+});
+
+test("a skipped custom element does not block a genuine editable inside it", () => {
+  setupDom('<!doctype html><html><body><my-grid editable><h2 editable>Title</h2></my-grid></body></html>');
+  const editors = RichClay.init(undefined, { Squire: FakeSquire });
+
+  assert.equal(editors.length, 1);
+  assert.equal(editors[0].element, document.querySelector("h2"));
+});
+
+test("an explicitly mounted custom element survives being replaced", async () => {
+  setupDom('<!doctype html><html><body><my-grid editable><p>rows</p></my-grid></body></html>', "https://example.test/?editmode=true");
+  window.hyperclay = { isEditMode: true, beforeSave() {} };
+  const grid = document.querySelector("my-grid");
+  RichClay.init("my-grid", { Squire: FakeSquire });
+  // Without a marker the default watcher refuses it, so a live-sync morph that
+  // swaps the node kills the editor for good.
+  assert.equal(grid.hasAttribute("data-richclay"), true);
+
+  RichClay.watch(window, { Squire: FakeSquire });
+  const replacement = grid.cloneNode(true);
+  ["class", "contenteditable", "role", "aria-multiline"].forEach(a => replacement.removeAttribute(a));
+  grid.replaceWith(replacement);
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  assert.equal(replacement.getAttribute("contenteditable"), "true");
+});
+
+test("an explicit selector still reaches a custom element", () => {
+  setupDom('<!doctype html><html><body><my-grid editable><p>rows</p></my-grid></body></html>');
+  const editors = RichClay.init("my-grid", { Squire: FakeSquire });
+
+  assert.equal(editors.length, 1);
+  assert.equal(editors[0].element, document.querySelector("my-grid"));
+});
+
+test("an opted-in custom element saves without a stray richclay marker", () => {
+  setupDom('<!doctype html><html><body><my-note clay-editable><p>text</p></my-note></body></html>');
+  RichClay.init(undefined, { Squire: FakeSquire });
+
+  const note = document.querySelector("my-note");
+  assert.equal(note.hasAttribute("data-richclay"), false);
+
+  const clone = document.documentElement.cloneNode(true);
+  stripRichClayFromClone(clone);
+  assert.equal(
+    clone.querySelector("my-note").outerHTML,
+    '<my-note clay-editable=""><p>text</p></my-note>'
+  );
+});

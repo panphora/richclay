@@ -531,7 +531,15 @@ var RichClayBundle = (() => {
   }
 
   // src/hyperclay.js
-  var RICHCLAY_SELECTOR = "[data-richclay], [richclay], [editable]";
+  var RICHCLAY_SELECTOR = "[data-richclay], [richclay], [editable], [clay-editable]";
+  var RICHCLAY_OPT_IN = "[data-richclay], [richclay], [clay-editable]";
+  var EDITABLE_ATTRS = ["editable", "clay-editable"];
+  var singleLineSelector = ':is([editable~="single-line"], [clay-editable~="single-line"])';
+  function isRichClayHost(el) {
+    if (!el || typeof el.matches !== "function") return false;
+    if (!el.tagName.includes("-")) return true;
+    return el.matches(RICHCLAY_OPT_IN);
+  }
   var CHROME_SELECTOR = "[data-richclay-toolbar], [data-richclay-menu], [data-richclay-dialog], [data-richclay-live], [data-richclay-float]";
   var runtimeClasses = [
     "richclay-editor",
@@ -588,9 +596,10 @@ var RichClayBundle = (() => {
     return isHyperclayEditMode(win);
   }
   function parseEditableOptions(element) {
-    if (!element.hasAttribute("editable")) return null;
+    const name = EDITABLE_ATTRS.find((attr) => element.hasAttribute(attr));
+    if (!name) return null;
     const tokens = new Set(
-      (element.getAttribute("editable") || "").trim().split(/\s+/).filter(Boolean)
+      (element.getAttribute(name) || "").trim().split(/\s+/).filter(Boolean)
     );
     const options = {
       inline: true,
@@ -635,7 +644,7 @@ var RichClayBundle = (() => {
       removeRuntimeState(region, "save");
       if (needsFlattening(region)) {
         const doc = region.ownerDocument;
-        const singleLine = Boolean(region.matches?.('[editable~="single-line"]'));
+        const singleLine = Boolean(region.matches?.(singleLineSelector));
         flattenBlocks(
           region,
           () => singleLine ? doc.createTextNode(" ") : doc.createElement("br")
@@ -645,7 +654,7 @@ var RichClayBundle = (() => {
           nested.remove();
         });
       }
-      if (region.matches?.('[editable~="single-line"]')) unwrapLoneSingleLineBlock(region);
+      if (region.matches?.(singleLineSelector)) unwrapLoneSingleLineBlock(region);
       region.querySelectorAll("#squire-selection-start, #squire-selection-end").forEach((node) => {
         node.remove();
       });
@@ -677,7 +686,7 @@ var RichClayBundle = (() => {
     return !reparsed || reparsed.textContent !== region.textContent;
   }
   var selfNests = (region) => Boolean(region.querySelector(region.localName));
-  var needsFlattening = (region) => Boolean(region.matches?.('[editable~="single-line"]')) || (hasBlockDescendant(region) || selfNests(region)) && ejectsOnReload(region);
+  var needsFlattening = (region) => Boolean(region.matches?.(singleLineSelector)) || (hasBlockDescendant(region) || selfNests(region)) && ejectsOnReload(region);
   function removeRuntimeState(region, mode) {
     const origin = region.getAttribute("data-richclay-runtime-contenteditable");
     if (region.hasAttribute("contenteditable")) {
@@ -1599,7 +1608,8 @@ var RichClayBundle = (() => {
       return this.element.ownerDocument.defaultView || window;
     }
     static init(selector = RICHCLAY_SELECTOR, options = {}) {
-      const elements = resolveElements(selector).filter((element) => !conflictsWithExistingEditor(element));
+      const guard = selector === RICHCLAY_SELECTOR ? isRichClayHost : () => true;
+      const elements = resolveElements(selector).filter(guard).filter((element) => !conflictsWithExistingEditor(element));
       return elements.map((element) => new _RichClay(element, options));
     }
     static autoInit(win = typeof window !== "undefined" ? window : void 0) {
@@ -1621,6 +1631,7 @@ var RichClayBundle = (() => {
       if (!win || !win.document || watchedWindows.has(win)) return;
       watchedWindows.add(win);
       const mount = (element) => {
+        if (!isMountable(element)) return;
         if (!instances.has(element) && !conflictsWithExistingEditor(element)) new _RichClay(element, options);
       };
       const unmount = (element) => instances.get(element)?.destroy();
@@ -1628,7 +1639,7 @@ var RichClayBundle = (() => {
         records.forEach((record) => {
           if (record.type === "attributes") {
             const target = record.target;
-            if (target.matches?.(RICHCLAY_SELECTOR)) mount(target);
+            if (isMountable(target)) mount(target);
             else unmount(target);
             return;
           }
@@ -1651,7 +1662,7 @@ var RichClayBundle = (() => {
         childList: true,
         subtree: true,
         attributes: true,
-        attributeFilter: ["editable", "data-richclay", "richclay"]
+        attributeFilter: ["editable", "clay-editable", "data-richclay", "richclay"]
       });
     }
     static registerButton(def) {
@@ -2096,7 +2107,7 @@ var RichClayBundle = (() => {
       this.dialog = null;
     }
     ensureMarker() {
-      if (!this.element.hasAttribute("data-richclay") && !this.element.hasAttribute("richclay") && !this.element.hasAttribute("editable")) {
+      if (!isMountable(this.element)) {
         this.element.setAttribute("data-richclay", "");
       }
     }
@@ -2397,8 +2408,19 @@ var RichClayBundle = (() => {
     const match = element?.closest?.(selector);
     return match && root.contains(match) && match !== root ? match : null;
   }
+  function closestConflictingAncestor(element) {
+    let node = element.parentElement;
+    while (node) {
+      if (instances.has(node) || isMountable(node)) return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+  function isMountable(element) {
+    return Boolean(element.matches?.(RICHCLAY_SELECTOR)) && isRichClayHost(element);
+  }
   function conflictsWithExistingEditor(element) {
-    const host = element.parentElement?.closest?.(RICHCLAY_SELECTOR);
+    const host = closestConflictingAncestor(element);
     const nested = Array.from(element.querySelectorAll?.(RICHCLAY_SELECTOR) || []).find(
       (node) => instances.has(node)
     );

@@ -1,6 +1,31 @@
 import { flattenBlocks, hasBlockDescendant } from "./normalize.js";
 
-export const RICHCLAY_SELECTOR = "[data-richclay], [richclay], [editable]";
+export const RICHCLAY_SELECTOR = "[data-richclay], [richclay], [editable], [clay-editable]";
+
+// The names that say "richclay" and nothing else. `editable` is deliberately not
+// among them: it is the friendly spelling, and it is also a name other people use.
+const RICHCLAY_OPT_IN = "[data-richclay], [richclay], [clay-editable]";
+
+// Both spellings of the option-carrying attribute, in the order they are consulted.
+// `clay-editable` is the escape hatch for a page whose custom element already owns
+// the bare name, so it has to behave identically down to the token list: a spelling
+// that mounts a different editor is worse than no escape hatch at all.
+const EDITABLE_ATTRS = ["editable", "clay-editable"];
+
+const singleLineSelector = ':is([editable~="single-line"], [clay-editable~="single-line"])';
+
+// A custom element's tag name always contains a hyphen, and `editable` is a common
+// boolean property on one: Lit reflects `@property({ type: Boolean }) editable`
+// straight to this attribute, where it means whatever that component decided and
+// never rich text. Mounting an editor on such an element makes its rendered output
+// typeable and writes that output into the author's saved file, which is damage the
+// author cannot see until they open the file. A custom element that does want
+// richclay asks by name.
+export function isRichClayHost(el) {
+  if (!el || typeof el.matches !== "function") return false;
+  if (!el.tagName.includes("-")) return true;
+  return el.matches(RICHCLAY_OPT_IN);
+}
 export const CHROME_SELECTOR =
   "[data-richclay-toolbar], [data-richclay-menu], [data-richclay-dialog], [data-richclay-live], [data-richclay-float]";
 
@@ -101,9 +126,10 @@ export function shouldActivateEditor(options = {}, win = window) {
 // The editable attribute's value is a space-separated token list, like class.
 // Unknown tokens are ignored for forward compatibility.
 export function parseEditableOptions(element) {
-  if (!element.hasAttribute("editable")) return null;
+  const name = EDITABLE_ATTRS.find(attr => element.hasAttribute(attr));
+  if (!name) return null;
   const tokens = new Set(
-    (element.getAttribute("editable") || "").trim().split(/\s+/).filter(Boolean)
+    (element.getAttribute(name) || "").trim().split(/\s+/).filter(Boolean)
   );
   const options = {
     inline: true,
@@ -176,7 +202,7 @@ export function stripRichClayFromClone(docElem) {
     // And it runs on a clone, so it cannot disturb the caret or the undo stack.
     if (needsFlattening(region)) {
       const doc = region.ownerDocument;
-      const singleLine = Boolean(region.matches?.('[editable~="single-line"]'));
+      const singleLine = Boolean(region.matches?.(singleLineSelector));
       flattenBlocks(region, () =>
         singleLine ? doc.createTextNode(" ") : doc.createElement("br")
       );
@@ -187,7 +213,7 @@ export function stripRichClayFromClone(docElem) {
         nested.remove();
       });
     }
-    if (region.matches?.('[editable~="single-line"]')) unwrapLoneSingleLineBlock(region);
+    if (region.matches?.(singleLineSelector)) unwrapLoneSingleLineBlock(region);
     region.querySelectorAll("#squire-selection-start, #squire-selection-end").forEach(node => {
       node.remove();
     });
@@ -264,7 +290,7 @@ const selfNests = region => Boolean(region.querySelector(region.localName));
 // possible outcome. Measured on an 8-paragraph region: the check is 0.02 ms and the
 // reparse it skips is 0.43 ms, so an ordinary save pays almost nothing.
 const needsFlattening = region =>
-  Boolean(region.matches?.('[editable~="single-line"]')) ||
+  Boolean(region.matches?.(singleLineSelector)) ||
   ((hasBlockDescendant(region) || selfNests(region)) && ejectsOnReload(region));
 
 // Shared runtime-state removal used by both the save strip (on the cloned

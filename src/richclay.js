@@ -31,6 +31,7 @@ import {
 } from "./sanitize.js";
 import {
   RICHCLAY_SELECTOR,
+  isRichClayHost,
   consumeInertContenteditable,
   installHyperclayBridge,
   isHyperclayEditMode,
@@ -160,7 +161,12 @@ export default class RichClay {
   }
 
   static init(selector = RICHCLAY_SELECTOR, options = {}) {
-    const elements = resolveElements(selector).filter(element => !conflictsWithExistingEditor(element));
+    // A caller who names its own hosts means them, custom elements included; the
+    // custom-element guard only applies to the default catch-all selector.
+    const guard = selector === RICHCLAY_SELECTOR ? isRichClayHost : () => true;
+    const elements = resolveElements(selector)
+      .filter(guard)
+      .filter(element => !conflictsWithExistingEditor(element));
     return elements.map(element => new RichClay(element, options));
   }
 
@@ -185,6 +191,7 @@ export default class RichClay {
     watchedWindows.add(win);
 
     const mount = element => {
+      if (!isMountable(element)) return;
       if (!instances.has(element) && !conflictsWithExistingEditor(element)) new RichClay(element, options);
     };
     const unmount = element => instances.get(element)?.destroy();
@@ -193,7 +200,11 @@ export default class RichClay {
       records.forEach(record => {
         if (record.type === "attributes") {
           const target = record.target;
-          if (target.matches?.(RICHCLAY_SELECTOR)) mount(target);
+          // Matching the selector is not enough to keep an editor alive. A custom
+          // element carrying a bare `editable` matches it and is still refused by
+          // the host guard, so deciding by the selector alone left such an element
+          // mounted forever with its runtime chrome saved into the file.
+          if (isMountable(target)) mount(target);
           else unmount(target);
           return;
         }
@@ -219,7 +230,7 @@ export default class RichClay {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ["editable", "data-richclay", "richclay"]
+      attributeFilter: ["editable", "clay-editable", "data-richclay", "richclay"]
     });
   }
 
@@ -793,11 +804,13 @@ export default class RichClay {
   }
 
   ensureMarker() {
-    if (
-      !this.element.hasAttribute("data-richclay") &&
-      !this.element.hasAttribute("richclay") &&
-      !this.element.hasAttribute("editable")
-    ) {
+    // The marker exists so an element mounted through an explicit selector is
+    // still recognized on the next pass. What decides that is not whether the
+    // element matches the selector but whether the watcher would adopt it again: a
+    // custom element carrying a bare `editable` matches and is still refused by the
+    // host guard, so with no marker its editor died on the first node replacement
+    // and never came back. Stamping makes the guard pass, so the two agree.
+    if (!isMountable(this.element)) {
       this.element.setAttribute("data-richclay", "");
     }
   }
@@ -1167,12 +1180,31 @@ function matchAtBoundary(root, container, offset, first, selector) {
   return match && root.contains(match) && match !== root ? match : null;
 }
 
+// An ancestor conflicts when it holds a live editor, or when it would get one.
+// closest() cannot answer the second half on its own: it stops at the nearest
+// element matching the selector, and a custom element the host guard refuses
+// matches it while never becoming an editor, which made <my-grid editable> block a
+// genuine <h2 editable> inside it and left the page with no editors at all.
+function closestConflictingAncestor(element) {
+  let node = element.parentElement;
+  while (node) {
+    if (instances.has(node) || isMountable(node)) return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
 // Two Squire instances mutating one subtree is undefined: the outer editor's
 // repair restructures the inner one's content behind its back, inside the outer's
 // modifyDocument, so the inner instance never sees it. Checked in both directions,
 // because the editors can be constructed in either order.
+// The single question every mount path asks: would the default watcher adopt this?
+function isMountable(element) {
+  return Boolean(element.matches?.(RICHCLAY_SELECTOR)) && isRichClayHost(element);
+}
+
 function conflictsWithExistingEditor(element) {
-  const host = element.parentElement?.closest?.(RICHCLAY_SELECTOR);
+  const host = closestConflictingAncestor(element);
   const nested = Array.from(element.querySelectorAll?.(RICHCLAY_SELECTOR) || []).find(node =>
     instances.has(node)
   );
