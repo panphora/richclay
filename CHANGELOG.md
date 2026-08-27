@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0] - 2026-08-27
+
+### Added
+- clay-editable element
+
+### Changed
+- removed hyperclay-actual-website from propagate destinations
+- updated richclay
+
+### Fixed
+- custom elements no longer auto-mount editors
+
+
+
 ## [0.3.0] - 2026-08-27
 
 ### Changed
