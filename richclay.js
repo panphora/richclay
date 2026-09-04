@@ -569,6 +569,9 @@ var RichClayBundle = (() => {
   function platformDocumentTransform(win) {
     return win.clay?.addDocumentTransform || win.hyperclay?.beforeSave || null;
   }
+  function platformSnapshotTransform(win) {
+    return win.clay?.onSnapshot || win.hyperclay?.onSnapshot || null;
+  }
   var PRE_CONTAINMENT = {
     boxSizing: "border-box",
     minWidth: "100%",
@@ -611,12 +614,12 @@ var RichClayBundle = (() => {
   }
   function installHyperclayBridge(win = window) {
     if (installedWindows.has(win)) return;
-    const addDocumentTransform = platformDocumentTransform(win);
-    if (typeof addDocumentTransform !== "function") {
+    const register = platformSnapshotTransform(win) || platformDocumentTransform(win);
+    if (typeof register !== "function") {
       armBridgeRetry(win);
       return;
     }
-    addDocumentTransform((docElem) => stripRichClayFromClone(docElem));
+    register((docElem) => stripRichClayFromClone(docElem));
     installedWindows.add(win);
   }
   function armBridgeRetry(win) {
@@ -723,6 +726,10 @@ var RichClayBundle = (() => {
     region.removeAttribute("data-richclay-runtime-describedby");
     region.removeAttribute("data-richclay-runtime-contenteditable");
     region.removeAttribute("data-richclay-runtime-display");
+    if (region.getAttribute("data-richclay-runtime-marker") === "true") {
+      region.removeAttribute("data-richclay");
+    }
+    region.removeAttribute("data-richclay-runtime-marker");
   }
   function stripZeroWidthArtifacts(region) {
     const zwsp = String.fromCharCode(8203);
@@ -2108,6 +2115,7 @@ var RichClayBundle = (() => {
     }
     ensureMarker() {
       if (!isMountable(this.element)) {
+        this.element.setAttribute("data-richclay-runtime-marker", "true");
         this.element.setAttribute("data-richclay", "");
       }
     }

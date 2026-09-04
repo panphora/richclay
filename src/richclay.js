@@ -811,6 +811,13 @@ export default class RichClay {
     // host guard, so with no marker its editor died on the first node replacement
     // and never came back. Stamping makes the guard pass, so the two agree.
     if (!isMountable(this.element)) {
+      // Record that WE invented this marker. Without it, cleanup cannot tell an
+      // element the author marked from one richclay stamped, so it either leaves
+      // ours behind forever (the element stays adoptable on every later load,
+      // and the attribute reaches the saved file) or strips theirs (silently
+      // breaking a region they asked for). Same provenance idea as
+      // data-richclay-runtime-contenteditable just below.
+      this.element.setAttribute("data-richclay-runtime-marker", "true");
       this.element.setAttribute("data-richclay", "");
     }
   }

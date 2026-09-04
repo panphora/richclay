@@ -85,6 +85,17 @@ function platformDocumentTransform(win) {
   return win.clay?.addDocumentTransform || win.hyperclay?.beforeSave || null;
 }
 
+// onSnapshot runs on EVERY snapshot, save and live sync alike; the document
+// transform runs only on the save branch, after the sync frame has already been
+// dispatched. Registering only on the latter meant every live-sync frame carried
+// contenteditable, the active classes and the runtime data-richclay to every
+// other browser, whose own watcher subscribes to data-richclay and mounted an
+// editor on it. Prefer the snapshot hook; fall back for a client too old to have
+// one.
+function platformSnapshotTransform(win) {
+  return win.clay?.onSnapshot || win.hyperclay?.onSnapshot || null;
+}
+
 // richclay's stylesheet carries save-remove, so no rule in richclay.css reaches
 // the saved file. A <pre> has `white-space: pre` and never wraps, so without
 // containment one long line runs off the side of the published page. These four
@@ -142,13 +153,13 @@ export function parseEditableOptions(element) {
 
 export function installHyperclayBridge(win = window) {
   if (installedWindows.has(win)) return;
-  const addDocumentTransform = platformDocumentTransform(win);
-  if (typeof addDocumentTransform !== "function") {
+  const register = platformSnapshotTransform(win) || platformDocumentTransform(win);
+  if (typeof register !== "function") {
     armBridgeRetry(win);
     return;
   }
 
-  addDocumentTransform(docElem => stripRichClayFromClone(docElem));
+  register(docElem => stripRichClayFromClone(docElem));
   installedWindows.add(win);
 }
 
@@ -339,6 +350,15 @@ export function removeRuntimeState(region, mode) {
   region.removeAttribute("data-richclay-runtime-describedby");
   region.removeAttribute("data-richclay-runtime-contenteditable");
   region.removeAttribute("data-richclay-runtime-display");
+
+  // Only a marker richclay invented comes off; an authored data-richclay has no
+  // provenance attribute and survives byte for byte. Note this list is an
+  // explicit enumeration, not a prefix sweep, so a new runtime attribute is only
+  // removed if it is named here.
+  if (region.getAttribute("data-richclay-runtime-marker") === "true") {
+    region.removeAttribute("data-richclay");
+  }
+  region.removeAttribute("data-richclay-runtime-marker");
 }
 
 function stripZeroWidthArtifacts(region) {

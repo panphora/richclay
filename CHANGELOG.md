@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.0] - 2026-09-04
+
+### Fixed
+- **A `data-richclay` marker richclay invented is now taken back off.** Binding an editor to an element carrying none of richclay's four selectors stamps `data-richclay` on it, so the watcher re-adopts the region after a node replacement. Nothing removed that stamp, so a single editing session permanently changed the author's file and the element stayed independently editable on every later load. Richclay now records its own stamps with `data-richclay-runtime-marker` and removes both on save and on `destroy()`. A `data-richclay` the author wrote has no provenance attribute and is preserved byte for byte, exactly as before. This is the same provenance mechanism `data-richclay-runtime-contenteditable` already used.
+- **Live-sync frames no longer carry the editor's runtime state.** The save-strip registered only through the host's document transform, which runs on the save branch only, after the sync frame has already gone out. Every collaborator therefore received `contenteditable`, the active classes, the runtime marker and the floating toolbar, and their own watcher, which subscribes to `data-richclay`, mounted an editor on it. The strip now registers through the host's `onSnapshot` hook where one exists, which covers save and sync alike, and falls back to the document transform for an older client.
+
+### Changed
+- Because the strip now runs at snapshot time, it also runs over the clone used for dirty comparison. Editor chrome therefore no longer contributes to whether the page is considered changed.
+
 ## [0.4.0] - 2026-08-27
 
 ### Changed
