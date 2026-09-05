@@ -892,6 +892,32 @@ test("stripElement puts an orphaned clone back to plain markup", () => {
   assert.equal(theirs.hasAttribute("data-richclay-active"), false);
 });
 
+// The other kind of clone: one carrying the author's own data-richclay is
+// mountable, so the watcher gives it an instance before the host's orphan sweep
+// runs. Stripping the attributes and leaving that instance in the cache left an
+// editor pointing at an element with no contenteditable, and every later
+// constructor call handed the same dead instance back, so the row could not be
+// edited at all.
+test("stripElement destroys a live instance instead of stranding it in the cache", () => {
+  setupDom(`<!doctype html><html><body><h1 class="t" data-richclay>Hello</h1></body></html>`);
+  const el = document.querySelector(".t");
+  const mounted = new RichClay(el, { Squire: FakeSquire, toolbar: [] });
+  assert.equal(mounted.active, true, "guard: the watcher's mount is live");
+
+  RichClay.stripElement(el);
+
+  assert.equal(mounted.squire, null, "the instance was torn down, not just unwired from its element");
+  assert.equal(el.hasAttribute("contenteditable"), false);
+  assert.equal(el.hasAttribute("data-richclay-active"), false);
+  assert.equal(el.hasAttribute("data-richclay"), true, "an authored marker is the author's markup");
+
+  const remounted = new RichClay(el, { Squire: FakeSquire, toolbar: [] });
+
+  assert.notEqual(remounted, mounted, "a later mount gets a fresh instance, not the dead one");
+  assert.equal(remounted.active, true);
+  assert.equal(el.getAttribute("contenteditable"), "true", "so the row can be edited again");
+});
+
 const BRIDGE_PAGE = `<!doctype html><html><body>
   <p editable data-richclay-active="true" class="richclay-inline richclay-active"
      contenteditable="true" data-richclay-runtime-contenteditable="true">hi</p>

@@ -1684,15 +1684,23 @@ var RichClayBundle = (() => {
     static stripFromClone(docElem) {
       stripRichClayFromClone(docElem);
     }
-    // Remove richclay's runtime state from ONE element that has no live instance.
+    // Remove richclay's runtime state from ONE element, addressed by element
+    // rather than by instance.
     //
     // A host that grows a list by cloning a row clones an active region with it,
-    // and the copy carries contenteditable, the marker and the runtime classes
-    // with no editor behind them. destroy() cannot reach it: destroy belongs to an
-    // instance and the clone has none. This is the cleanup destroy performs,
-    // addressed by element instead, so an orphan can be put back to plain markup.
+    // and the copy carries contenteditable, the marker and the runtime classes.
+    // Usually there is no editor behind them and destroy() cannot reach it,
+    // because destroy belongs to an instance and that clone has none. But a clone
+    // carrying the author's own data-richclay is mountable, so the watcher can
+    // have given it an instance before the host gets here: this cannot assume the
+    // element is instanceless.
     static stripElement(element) {
       if (!element || typeof element.getAttribute !== "function") return;
+      const existing = instances.get(element);
+      if (existing) {
+        existing.destroy();
+        return;
+      }
       removeRuntimeState(element, "destroy");
     }
     registerButton(def) {
