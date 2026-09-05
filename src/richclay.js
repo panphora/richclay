@@ -249,6 +249,18 @@ export default class RichClay {
     stripRichClayFromClone(docElem);
   }
 
+  // Remove richclay's runtime state from ONE element that has no live instance.
+  //
+  // A host that grows a list by cloning a row clones an active region with it,
+  // and the copy carries contenteditable, the marker and the runtime classes
+  // with no editor behind them. destroy() cannot reach it: destroy belongs to an
+  // instance and the clone has none. This is the cleanup destroy performs,
+  // addressed by element instead, so an orphan can be put back to plain markup.
+  static stripElement(element) {
+    if (!element || typeof element.getAttribute !== "function") return;
+    removeRuntimeState(element, "destroy");
+  }
+
   registerButton(def) {
     validateButton(def);
     this.registry.set(def.id, def);

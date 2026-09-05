@@ -853,6 +853,45 @@ test("save-strip keeps empty inline wrappers that carry attributes", () => {
   assert.equal(editor.querySelector("em"), null);
 });
 
+// A host that grows a list by cloning a row clones an active region with it, and
+// the copy carries the runtime state with no editor behind it. destroy() cannot
+// reach it, so stripElement performs destroy's cleanup addressed by element and
+// the orphan goes back to plain markup. The provenance rule is unchanged: an
+// authored data-richclay is the author's markup and stays.
+test("stripElement puts an orphaned clone back to plain markup", () => {
+  setupDom(`
+    <!doctype html><html><body>
+      <h1 class="richclay-inline richclay-active" data-richclay data-richclay-runtime-marker="true"
+          data-richclay-active="true" contenteditable="true"
+          data-richclay-runtime-contenteditable="true">Hello</h1>
+      <h2 data-richclay data-richclay-active="true" contenteditable="true"
+          data-richclay-runtime-contenteditable="true">Theirs</h2>
+      <h3 data-richclay data-richclay-active="true" contenteditable="true">Ours</h3>
+    </body></html>
+  `);
+
+  const orphan = document.querySelector("h1");
+  RichClay.stripElement(orphan);
+  assert.equal(orphan.outerHTML, "<h1>Hello</h1>");
+
+  const authored = document.querySelector("h2");
+  RichClay.stripElement(authored);
+  assert.equal(authored.hasAttribute("data-richclay"), true, "an authored marker is the author's markup");
+  assert.equal(authored.hasAttribute("contenteditable"), false);
+
+  // Why the mode is "destroy" and not "save", which is the only thing that
+  // argument decides. This runs on the live page, not on a save clone, and an
+  // element with no data-richclay-runtime-contenteditable is one the author
+  // wrote contenteditable on themselves. Save mode moves that to
+  // inert-contenteditable, which would take an editable region out of a page
+  // hypercms merely cloned a row in.
+  const theirs = document.querySelector("h3");
+  RichClay.stripElement(theirs);
+  assert.equal(theirs.getAttribute("contenteditable"), "true", "the author's own editable region survives");
+  assert.equal(theirs.hasAttribute("inert-contenteditable"), false);
+  assert.equal(theirs.hasAttribute("data-richclay-active"), false);
+});
+
 const BRIDGE_PAGE = `<!doctype html><html><body>
   <p editable data-richclay-active="true" class="richclay-inline richclay-active"
      contenteditable="true" data-richclay-runtime-contenteditable="true">hi</p>
