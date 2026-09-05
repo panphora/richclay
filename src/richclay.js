@@ -293,14 +293,7 @@ export default class RichClay {
     if (this.active) return;
 
     this.active = true;
-    // A block inside an inline element renders as a run-on. This changes the box
-    // and nothing else: whether a region survives a reload is decided by the
-    // parser from tag names, before any CSS exists. Runtime only, so the author's
-    // file keeps no style richclay put there.
-    if (isInlineTag(this.element) && !this.element.style.display) {
-      this.element.style.display = "inline-block";
-      this.element.setAttribute("data-richclay-runtime-display", "true");
-    }
+    this.applyInlineBox();
     ensureStyles(this.element.ownerDocument);
     consumeInertContenteditable(this.element);
 
@@ -389,6 +382,47 @@ export default class RichClay {
     this.warnOnBlockInInlineRegion();
     // Whatever <pre> elements exist before the first command are the author's.
     this.element.querySelectorAll("pre").forEach(pre => this._authoredPres.add(pre));
+  }
+
+  // Live sync morphs the page against an incoming copy, and that copy is clean:
+  // contenteditable, the marker and the runtime attributes all come back off an
+  // element this editor is still pointing at. The instance is fine and Squire is
+  // still bound; only the element's own state is gone, and activate() cannot put
+  // it back because it returns early on an instance that never stopped being
+  // active. Rebuilding is not an option for a host that adopted an editor the
+  // author mounted, so this re-applies the state instead.
+  //
+  // The marker is in here because it is the one whose absence is fatal rather
+  // than cosmetic: without it the watcher stops recognising the element, which
+  // is the failure ensureMarker's own comment describes.
+  //
+  // Returns whether it had to do anything, so a caller can tell a repair from a
+  // no-op without asking the same question twice.
+  reattach() {
+    if (this.unsupported || !this.active) return false;
+    // isMountable is the question ensureMarker asks, so this is "would the
+    // watcher still adopt this element", not a guess at which attributes matter.
+    const intact =
+      this.element.getAttribute("contenteditable") === "true" &&
+      this.element.getAttribute("data-richclay-active") === "true" &&
+      isMountable(this.element);
+    if (intact) return false;
+    this.ensureMarker();
+    this.applyInlineBox();
+    consumeInertContenteditable(this.element);
+    this.setupEditorAttributes();
+    return true;
+  }
+
+  // A block inside an inline element renders as a run-on. This changes the box
+  // and nothing else: whether a region survives a reload is decided by the
+  // parser from tag names, before any CSS exists. Runtime only, so the author's
+  // file keeps no style richclay put there.
+  applyInlineBox() {
+    if (isInlineTag(this.element) && !this.element.style.display) {
+      this.element.style.display = "inline-block";
+      this.element.setAttribute("data-richclay-runtime-display", "true");
+    }
   }
 
   getHTML() {
@@ -888,13 +922,28 @@ export default class RichClay {
 
     if (this.options.placeholder) {
       this.element.setAttribute("data-richclay-placeholder", this.options.placeholder);
-      this.description = this.element.ownerDocument.createElement("div");
-      this.description.id = `richclay-placeholder-${++dialogSeq}`;
-      this.description.className = "richclay-sr-only";
-      this.description.textContent = this.options.placeholder;
-      this.description.setAttribute("data-richclay-live", "");
-      markChrome(this.description);
-      this.element.insertAdjacentElement("afterend", this.description);
+      // One description for the life of the instance. A second call that built
+      // another would orphan the first: destroy() removes only the node this
+      // points at, and removeRuntimeDescribedBy clears only the id named by the
+      // runtime attribute, both of which the second call has overwritten. The
+      // original node and a dangling aria-describedby would reach the saved page.
+      // A morph can take the node itself away, so a detached one is put back
+      // rather than replaced, which keeps its id and the wiring that names it.
+      if (!this.description) {
+        this.description = this.element.ownerDocument.createElement("div");
+        this.description.id = `richclay-placeholder-${++dialogSeq}`;
+        this.description.className = "richclay-sr-only";
+        this.description.textContent = this.options.placeholder;
+        this.description.setAttribute("data-richclay-live", "");
+        markChrome(this.description);
+      }
+      if (!this.description.isConnected) {
+        this.element.insertAdjacentElement("afterend", this.description);
+      }
+      // Outside the branch above, because a morph can strip the element's own
+      // aria-describedby while leaving this node connected, and then the hint is
+      // gone with nothing to notice it. connectDescription builds its id list
+      // from a Set, so naming the same description twice costs nothing.
       connectDescription(this.element, this.description);
     }
 

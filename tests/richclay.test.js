@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { setupDom, FakeSquire } from "./helpers.js";
 import RichClay from "../src/richclay.js";
+import { removeRuntimeState } from "../src/hyperclay.js";
 
 test("standalone init preserves existing sanitized HTML", () => {
   setupDom(`
@@ -204,4 +205,128 @@ test("destroy is idempotent and unwires Squire listeners", () => {
   assert.deepEqual(squire.events.get("input"), []);
   assert.equal(editor.element.innerHTML, "<p>Keep</p>");
   assert.doesNotThrow(() => editor.destroy());
+});
+
+// A live-sync morph hands the element the incoming copy's state, and that copy
+// went through the save strip, so removeRuntimeState is the strip itself rather
+// than a guessed list of attributes.
+test("reattach puts back everything the save strip took, including the marker richclay invented", () => {
+  setupDom('<!doctype html><html><body><my-widget editable><p>hi</p></my-widget></body></html>');
+  const element = document.querySelector("my-widget");
+  const editor = new RichClay(element, { Squire: FakeSquire, toolbar: false });
+  const activated = element.getAttributeNames().sort();
+
+  removeRuntimeState(element, "save");
+  assert.deepEqual(element.getAttributeNames(), ["editable"]);
+
+  assert.equal(editor.reattach(), true);
+  assert.deepEqual(element.getAttributeNames().sort(), activated);
+  assert.equal(element.getAttribute("data-richclay"), "");
+  assert.equal(element.getAttribute("data-richclay-runtime-marker"), "true");
+  assert.equal(element.getAttribute("contenteditable"), "true");
+  assert.equal(element.getAttribute("data-richclay-active"), "true");
+  assert.equal(element.classList.contains("richclay-active"), true);
+  assert.equal(new RichClay(element), editor);
+});
+
+test("reattach on a healthy instance returns false and changes nothing", () => {
+  setupDom('<!doctype html><html><body><div data-richclay><p>hi</p></div></body></html>');
+  const element = document.querySelector("[data-richclay]");
+  const editor = new RichClay(element, { Squire: FakeSquire, toolbar: "minimal" });
+  const before = element.outerHTML;
+
+  assert.equal(editor.reattach(), false);
+  assert.equal(element.outerHTML, before);
+});
+
+test("reattach returns false on an unsupported instance and on one that never activated", () => {
+  setupDom('<!doctype html><html><body><table editable><tr><td>one</td></tr></table></body></html>');
+  const original = console.warn;
+  console.warn = () => {};
+  let table;
+  try {
+    table = new RichClay(document.querySelector("[editable]"), { Squire: FakeSquire });
+  } finally {
+    console.warn = original;
+  }
+  assert.equal(table.unsupported, true);
+  assert.equal(table.reattach(), false);
+
+  setupDom('<!doctype html><html><body><div data-richclay><p>hi</p></div></body></html>');
+  const idle = new RichClay(document.querySelector("[data-richclay]"), {
+    Squire: FakeSquire,
+    readOnly: true
+  });
+  assert.equal(idle.active, false);
+  assert.equal(idle.reattach(), false);
+});
+
+test("a second setupEditorAttributes keeps one description, and destroy leaves none behind", () => {
+  setupDom('<!doctype html><html><body><div data-richclay></div></body></html>');
+  const element = document.querySelector("[data-richclay]");
+  const editor = new RichClay(element, {
+    Squire: FakeSquire,
+    toolbar: false,
+    placeholder: "Write here"
+  });
+  const description = editor.description;
+  const descriptions = () => document.querySelectorAll('[id^="richclay-placeholder-"]');
+
+  editor.setupEditorAttributes();
+
+  assert.equal(editor.description, description);
+  assert.equal(descriptions().length, 1);
+  assert.equal(element.getAttribute("aria-describedby"), description.id);
+
+  editor.destroy();
+
+  assert.equal(descriptions().length, 0);
+  assert.equal(element.hasAttribute("aria-describedby"), false);
+});
+
+test("a description the morph took away is put back by reattach, keeping its id", () => {
+  setupDom('<!doctype html><html><body><div data-richclay></div></body></html>');
+  const element = document.querySelector("[data-richclay]");
+  const editor = new RichClay(element, {
+    Squire: FakeSquire,
+    toolbar: false,
+    placeholder: "Write here"
+  });
+  const description = editor.description;
+  const id = description.id;
+
+  description.remove();
+  removeRuntimeState(element, "save");
+
+  assert.equal(editor.reattach(), true);
+  assert.equal(editor.description, description);
+  assert.equal(description.id, id);
+  assert.equal(element.nextElementSibling, description);
+  assert.equal(element.getAttribute("aria-describedby"), id);
+  assert.equal(document.querySelectorAll('[id^="richclay-placeholder-"]').length, 1);
+});
+
+test("reattach rewires the hint when the morph stripped it but left the description in place", () => {
+  setupDom('<!doctype html><html><body><div data-richclay></div></body></html>');
+  const element = document.querySelector("[data-richclay]");
+  const editor = new RichClay(element, {
+    Squire: FakeSquire,
+    toolbar: false,
+    placeholder: "Write here"
+  });
+  const description = editor.description;
+
+  removeRuntimeState(element, "save");
+  assert.equal(element.hasAttribute("aria-describedby"), false);
+  assert.equal(element.hasAttribute("data-richclay-runtime-describedby"), false);
+  assert.equal(description.isConnected, true);
+
+  assert.equal(editor.reattach(), true);
+
+  assert.equal(element.getAttribute("aria-describedby"), description.id);
+  assert.equal(element.getAttribute("data-richclay-runtime-describedby"), description.id);
+  assert.equal(
+    (element.getAttribute("aria-describedby").match(new RegExp(description.id, "g")) || []).length,
+    1
+  );
 });
