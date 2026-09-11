@@ -43,6 +43,80 @@ import {
   stripRichClayFromClone
 } from "./hyperclay.js";
 import { ensureStyles } from "./styles.js";
+import { createContentView } from './lib/content-dom.js';
+import { capabilitySelector, closestWithCapability } from './lib/region-capabilities.js';
+
+const EDITOR_UI_SELECTOR = capabilitySelector('history');
+
+function stripIncomingEditorUi(html, doc) {
+  const template = doc.createElement('template');
+  template.innerHTML = String(html || '');
+  for (const node of template.content.querySelectorAll(EDITOR_UI_SELECTOR)) node.remove();
+  return template.innerHTML;
+}
+
+function clipboardHTML(html, doc) {
+  return stripIncomingEditorUi(html, doc)
+}
+
+function clipboardText(html, doc) {
+  const template = doc.createElement('template')
+  template.innerHTML = clipboardHTML(html, doc)
+  const blocks = new Set(['ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'DIV', 'DL', 'FIELDSET', 'FIGCAPTION', 'FIGURE', 'FOOTER', 'FORM', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'HEADER', 'HR', 'LI', 'MAIN', 'NAV', 'OL', 'P', 'PRE', 'SECTION', 'TABLE', 'UL'])
+  let text = ''
+  const visit = node => {
+    if (node.nodeType === 3) text += node.data
+    else if (node.nodeType === 1 && node.tagName === 'BR') text += '\n'
+    else {
+      const block = node.nodeType === 1 && blocks.has(node.tagName)
+      if (block && text && !text.endsWith('\n')) text += '\n'
+      for (const child of node.childNodes || []) visit(child)
+      if (block && text && !text.endsWith('\n')) text += '\n'
+    }
+  }
+  visit(template.content)
+  return text.replace(/\n{3,}/g, '\n\n').replace(/^\n|\n$/g, '')
+}
+
+function serializeEditorRoot(root, editor, range = null) {
+  const view = createContentView(root, { capability: 'history', inherit: false })
+  const clone = view.root
+  const boundaryFor = (container, offset) => {
+    while (container && !view.cloneOf(container)) {
+      const parent = container.parentNode
+      if (!parent) return { container: clone, offset: 0 }
+      offset = Array.from(parent.childNodes).indexOf(container)
+      container = parent
+    }
+    const projected = view.cloneOf(container) || clone
+    if (container?.nodeType === 3) return { container: projected, offset: Math.min(offset, projected.length) }
+    const before = Array.from(container?.childNodes || []).slice(0, offset)
+      .filter(node => view.cloneOf(node)).length
+    return { container: projected, offset: Math.min(before, projected.childNodes.length) }
+  }
+  const insert = (id, container, offset) => {
+    const point = boundaryFor(container, offset)
+    const marker = clone.ownerDocument.createElement('input')
+    marker.id = id
+    marker.type = 'hidden'
+    const markerRange = clone.ownerDocument.createRange()
+    markerRange.setStart(point.container, point.offset)
+    markerRange.collapse(true)
+    markerRange.insertNode(marker)
+  }
+  if (range) {
+    insert(editor.endSelectionId, range.endContainer, range.endOffset)
+    insert(editor.startSelectionId, range.startContainer, range.startOffset)
+  } else {
+    for (const id of [editor.startSelectionId, editor.endSelectionId]) {
+      if (clone.querySelector(`#${id}`)) continue
+      const marker = root.querySelector(`#${id}`)
+      if (!marker) continue
+      insert(id, marker.parentNode, Array.from(marker.parentNode.childNodes).indexOf(marker))
+    }
+  }
+  return clone.innerHTML
+}
 import {
   announce,
   cloneRange,
@@ -312,8 +386,57 @@ export default class RichClay {
 
     this._squire = new Squire(this.element, {
       blockTag: this._blockTag,
+      serializeRoot: serializeEditorRoot,
+      willCutCopy: html => clipboardHTML(html, this.element.ownerDocument),
+      toPlainText: html => clipboardText(html, this.element.ownerDocument),
+      replaceRoot: (root, html, editor) => {
+        const morph = this.window.clay?.morph || this.window.hyperclay?.morph;
+        if (typeof morph !== 'function') {
+          if (root.querySelector('[editor-ui], [clay~="editor-ui"]')) {
+            throw new Error('RichClay requires a retention-aware morph host to replay history containing editor-ui.');
+          }
+          root.innerHTML = html;
+          return;
+        }
+        morph(root, html, {
+          morphStyle: 'innerHTML',
+          restoreFocus: false,
+          scripts: { handle: false, merge: false },
+          policy: 'history',
+        });
+        editor._ensureBottomLine();
+        editor._mutation?.takeRecords();
+      },
+      onMutations: (records, editor) => {
+        const excluded = (node, capability) => {
+          const boundary = closestWithCapability(node, capability);
+          return !!boundary && boundary !== this.element && this.element.contains(boundary);
+        };
+        let authored = false;
+        let local = false;
+        for (const record of records) {
+          if (excluded(record.target, 'history')) continue;
+          const nodes = record.type === 'childList'
+            ? [...record.addedNodes, ...record.removedNodes]
+            : [record.target];
+          for (const node of nodes) {
+            if (excluded(node, 'history')) continue;
+            if (excluded(record.target, 'undo') || excluded(node, 'undo')) local = true;
+            else authored = true;
+          }
+        }
+        if (authored) {
+          const ignored = editor._ignoreChange;
+          editor._docWasChanged();
+          if (local && ignored) editor.fireEvent('input');
+        }
+        else if (local) {
+          editor._mayHaveZWS = true;
+          editor.fireEvent('input');
+        } else editor._ignoreChange = false;
+      },
       sanitizeToDOMFragment: (html, editor) => {
-        const fragment = this.sanitizer.sanitizeToDOMFragment(html, editor);
+        const fragment = this.sanitizer.sanitizeToDOMFragment(stripIncomingEditorUi(html, this.element.ownerDocument), editor);
         return this.options.singleLine ? flattenFragmentToSingleLine(fragment) : fragment;
       },
       didError: error => {
@@ -1214,8 +1337,9 @@ export default class RichClay {
   }
 
   updatePlaceholder() {
-    const text = (this.element.textContent || "").replace(/\u200B/g, "").trim();
-    const hasMeaningfulElement = this.element.querySelector("img, video, audio, iframe, table");
+    const view = createContentView(this.element, { capability: 'history', inherit: false });
+    const text = view.text().replace(/\u200B/g, "").trim();
+    const hasMeaningfulElement = view.root.querySelector("img, video, audio, iframe, table");
     const isEmpty = !text && !hasMeaningfulElement;
     this.element.classList.toggle("richclay-empty", isEmpty);
   }

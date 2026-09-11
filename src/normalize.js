@@ -23,6 +23,7 @@ const TEXT_NODE = 3;
 const COMMENT_NODE = 8;
 
 const LEAF_NODE_NAMES = new Set(["BR", "HR", "IFRAME", "IMG", "INPUT", "WBR"]);
+const isEditorUi = node => node?.nodeType === ELEMENT_NODE && node.matches('[editor-ui],[clay~="editor-ui"]');
 
 // SVG and MathML roots keep their lowercase nodeName, so they can never match
 // INLINE_NODE_NAMES and would otherwise split a line of prose into three blocks
@@ -176,12 +177,13 @@ export function normalizeEditorRoot(root, options = {}) {
 // leave the predicate permanently true and re-run the whole pass, plus its
 // selection round trip, on every keystroke. Whitespace-only text nodes still
 // count: those are dropped, not skipped.
-const needsWrapping = node => isInlineNode(node) && node.nodeType !== COMMENT_NODE;
+const needsWrapping = node => isInlineNode(node) && node.nodeType !== COMMENT_NODE && !isEditorUi(node);
 
 // Comments (Hyperclay's region markers) and formatting whitespace are not
 // content, so a region holding only those is empty, not authored.
 const isAuthorContent = node =>
   node.nodeType !== COMMENT_NODE &&
+  !isEditorUi(node) &&
   !(node.nodeType === TEXT_NODE && !NOT_WHITESPACE.test(node.nodeValue));
 
 // True while the root still violates Squire's invariant, so the caller can skip
@@ -257,7 +259,8 @@ function wrapStrayInlineChildren(root, blockTag, wrapBareRoot, onBareRootWrapped
   };
 
   Array.from(root.childNodes).forEach(child => {
-    if (isInlineNode(child)) run.push(child);
+    if (isEditorUi(child)) flush();
+    else if (isInlineNode(child)) run.push(child);
     else flush();
   });
   flush();

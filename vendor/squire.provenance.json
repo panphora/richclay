@@ -2,6 +2,17 @@
   "package": "squire-rte",
   "version": "2.4.8",
   "patches": [
+    "mutation-record-boundary",
+    "mutation-boundary-method",
+    "mutation-drain-boundary",
+    "serialize-root-hook",
+    "replace-root-hook",
+    "ensure-bottom-line-content-boundary",
+    "ensure-bottom-line-before-interface",
+    "mutation-observer-old-attributes",
+    "mutation-drain-old-attributes",
+    "resize-interface-marker",
+    "public-html-detached-read",
     "removeAllFormatting-root-guard",
     "removeFormat-root-guard",
     "removeEmptyInlines-root-guard"
@@ -9,11 +20,11 @@
   "files": {
     "squire.js": {
       "upstream": "75c1665d33ec8c1a08dbb5cadae8381acfded4677da44d70cf88a59e4082af20",
-      "vendored": "7325380c9c18ba05296c4158cd45fa6bac2761ab0b4702bc0e9e46c7e9614220"
+      "vendored": "00f2b05431457a05f1b42e4f876b8a334c0e01841ed57a3aa47e6a0e463869c3"
     },
     "squire.mjs": {
       "upstream": "3132eacfad97dfaa120fa02f46d65d7f8d15e52b7fbe04387d763f20eba90ef2",
-      "vendored": "21c23197dae2ad0bba1e1297cd92cbd536e43048d4001a3647270b1723386d8a"
+      "vendored": "dd15e9a7dd4622b49c87ea48688f9b94534a434f612c62e381e456dd91ed24b0"
     }
   }
 }

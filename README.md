@@ -209,6 +209,13 @@ DOMPurify is required. The default allowlist keeps semantic rich text: paragraph
 
 Sanitization runs during activation, `setHTML()`, and Squire paste/insert paths through `sanitizeToDOMFragment`. Link dialog URLs also pass through `normalizeUrl()` before `squire.makeLink()`, so `javascript:`, `data:`, `vbscript:`, and control-character obfuscation are rejected.
 
+An editable region may contain in flow controls marked `editor-ui` or
+`clay="editor-ui"`. RichClay excludes those controls from public HTML,
+clipboard HTML and text, mutation driven input events, and Squire history.
+History replay retains the live control while restoring authored content. A
+host with runtime controls must provide the shared retention aware morph
+function; RichClay reports an explicit error instead of replacing that root.
+
 Use additive DOMPurify options when possible:
 
 ```js

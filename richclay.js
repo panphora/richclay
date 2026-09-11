@@ -293,6 +293,7 @@ var RichClayBundle = (() => {
   var TEXT_NODE = 3;
   var COMMENT_NODE = 8;
   var LEAF_NODE_NAMES = /* @__PURE__ */ new Set(["BR", "HR", "IFRAME", "IMG", "INPUT", "WBR"]);
+  var isEditorUi = (node) => node?.nodeType === ELEMENT_NODE && node.matches('[editor-ui],[clay~="editor-ui"]');
   var FOREIGN_INLINE_ROOTS = /* @__PURE__ */ new Set(["svg", "math"]);
   function isInlineNode(node) {
     const type = node.nodeType;
@@ -402,8 +403,8 @@ var RichClayBundle = (() => {
     }
     return root;
   }
-  var needsWrapping = (node) => isInlineNode(node) && node.nodeType !== COMMENT_NODE;
-  var isAuthorContent = (node) => node.nodeType !== COMMENT_NODE && !(node.nodeType === TEXT_NODE && !NOT_WHITESPACE.test(node.nodeValue));
+  var needsWrapping = (node) => isInlineNode(node) && node.nodeType !== COMMENT_NODE && !isEditorUi(node);
+  var isAuthorContent = (node) => node.nodeType !== COMMENT_NODE && !isEditorUi(node) && !(node.nodeType === TEXT_NODE && !NOT_WHITESPACE.test(node.nodeValue));
   function editorRootNeedsNormalization(root, { wrapBareRoot = false, blocksAllowed = !ejectsBlocks(root) } = {}) {
     if (!blocksAllowed) return false;
     if (!isBlockContainer(root)) return wrapBareRoot;
@@ -451,7 +452,8 @@ var RichClayBundle = (() => {
       nodes.forEach((node) => block.appendChild(node));
     };
     Array.from(root.childNodes).forEach((child) => {
-      if (isInlineNode(child)) run.push(child);
+      if (isEditorUi(child)) flush();
+      else if (isInlineNode(child)) run.push(child);
       else flush();
     });
     flush();
@@ -1528,7 +1530,226 @@ var RichClayBundle = (() => {
     styledDocs.add(doc);
   }
 
+  // src/lib/region-capabilities.js
+  var CAPABILITIES = Object.freeze({
+    data: Object.freeze({ tokens: ["no-data"], bundles: ["editor-ui"] }),
+    save: Object.freeze({ tokens: ["no-save"], bundles: ["editor-ui"] }),
+    snapshot: Object.freeze({ tokens: ["no-snapshot"], bundles: ["editor-ui"] }),
+    watch: Object.freeze({ tokens: ["no-watch"], bundles: ["editor-ui"] }),
+    undo: Object.freeze({ tokens: ["no-undo"], bundles: ["editor-ui"] }),
+    history: Object.freeze({ tokens: [], bundles: ["editor-ui"] })
+  });
+  var BUNDLES = Object.freeze({
+    "editor-ui": Object.freeze(["no-data", "no-save", "no-snapshot", "no-watch", "no-undo"])
+  });
+  var POLICY_TOKENS = Object.freeze([
+    "no-save",
+    "no-snapshot",
+    "no-trigger-autosave",
+    "no-dirty",
+    "no-watch",
+    "no-undo",
+    "no-data",
+    "freeze",
+    "editor-ui"
+  ]);
+  function hasPolicyToken(element, token) {
+    if (!element || element.nodeType !== 1) return false;
+    const clay = element.getAttribute?.("clay");
+    return !!(clay && clay.split(/\s+/).includes(token) || element.hasAttribute?.(token));
+  }
+  function expandsTo(element, token) {
+    if (hasPolicyToken(element, token)) return true;
+    for (const [bundle, members] of Object.entries(BUNDLES)) {
+      if (members.includes(token) && hasPolicyToken(element, bundle)) return true;
+    }
+    return false;
+  }
+  function capabilitySelector(capability) {
+    const definition = CAPABILITIES[capability];
+    if (!definition) throw new Error(`Unknown region capability: ${capability}`);
+    return [...definition.tokens, ...definition.bundles].flatMap((token) => [`[clay~="${token}"]`, `[${token}]`]).join(", ");
+  }
+  function closestWithCapability(node, capability) {
+    let element = node && node.nodeType === 1 ? node : node?.parentElement;
+    while (element && element.nodeType === 1) {
+      const definition = CAPABILITIES[capability];
+      if (!definition) throw new Error(`Unknown region capability: ${capability}`);
+      if (definition.tokens.some((token) => expandsTo(element, token)) || definition.bundles.some((bundle) => hasPolicyToken(element, bundle))) return element;
+      element = element.parentElement;
+    }
+    return null;
+  }
+  function hasCapability(node, capability) {
+    return !!closestWithCapability(node, capability);
+  }
+
+  // src/lib/content-dom.js
+  var UNSUPPORTED_SELECTOR = /:(?:focus(?:-within|-visible)?|hover|active|visited|defined)\b/i;
+  function copyControlState(source, copy) {
+    if (!/^(INPUT|TEXTAREA|SELECT|OPTION)$/.test(source.tagName || "")) return;
+    const type = (source.getAttribute?.("type") || "").toLowerCase();
+    if ("value" in source && "value" in copy && source.tagName !== "OPTION" && type !== "checkbox" && type !== "radio") copy.value = source.value;
+    if ("checked" in source && "checked" in copy) copy.checked = source.checked;
+    if ("selected" in source && "selected" in copy) copy.selected = source.selected;
+    if (source.tagName === "SELECT") {
+      for (let i = 0; i < source.options.length; i++) copy.options[i].selected = source.options[i].selected;
+    }
+    if ("indeterminate" in source && "indeterminate" in copy) copy.indeterminate = source.indeterminate;
+  }
+  function matchesWithin(node, selector, boundary, inherit) {
+    if (inherit) return !!node.closest?.(selector);
+    let current = node;
+    while (current?.nodeType === 1) {
+      if (current.matches(selector)) return true;
+      if (current === boundary) break;
+      current = current.parentElement;
+    }
+    return false;
+  }
+  function importTree(source, targetDocument, capability, capabilityMatch, exclude, boundary, inherit, maps) {
+    if (source.nodeType === 1 && ((inherit ? hasCapability(source, capability) : matchesWithin(source, capabilityMatch, boundary, false)) || exclude && matchesWithin(source, exclude, boundary, inherit))) return null;
+    const copy = targetDocument.importNode(source, false);
+    maps.cloneToLive.set(copy, source);
+    maps.liveToClone.set(source, copy);
+    const sourceChildren = source.nodeType === 1 && source.tagName === "TEMPLATE" ? source.content : source;
+    const copyChildren = copy.nodeType === 1 && copy.tagName === "TEMPLATE" ? copy.content : copy;
+    if (sourceChildren !== source) {
+      maps.cloneToLive.set(copyChildren, sourceChildren);
+      maps.liveToClone.set(sourceChildren, copyChildren);
+    }
+    for (const child of sourceChildren.childNodes || []) {
+      const childCopy = importTree(child, targetDocument, capability, capabilityMatch, exclude, boundary, inherit, maps);
+      if (childCopy) {
+        copyChildren.appendChild(childCopy);
+        if (child.nodeType === 1) copyControlState(child, childCopy);
+      }
+    }
+    if (source.nodeType === 1) copyControlState(source, copy);
+    return copy;
+  }
+  function createContentView(context, { capability = "data", exclude = null, inherit = true } = {}) {
+    if (!context) throw new TypeError("createContentView requires a DOM context");
+    const sourceDocument = context.nodeType === 9 ? context : context.ownerDocument;
+    if (!sourceDocument?.implementation?.createHTMLDocument) {
+      throw new TypeError("createContentView requires an HTML DOM implementation");
+    }
+    const inertDocument = sourceDocument.implementation.createHTMLDocument("");
+    const cloneToLive = /* @__PURE__ */ new WeakMap();
+    const liveToClone = /* @__PURE__ */ new WeakMap();
+    const sourceRoot = context.nodeType === 9 ? context.documentElement : context;
+    if (exclude) inertDocument.documentElement.matches(exclude);
+    const capabilityMatch = capabilitySelector(capability);
+    const root = importTree(sourceRoot, inertDocument, capability, capabilityMatch, exclude, sourceRoot, inherit, { cloneToLive, liveToClone });
+    if (context.nodeType === 9 && root) {
+      inertDocument.replaceChild(root, inertDocument.documentElement);
+      liveToClone.set(context, inertDocument);
+      cloneToLive.set(inertDocument, context);
+    }
+    const assertSelector = (selector) => {
+      if (UNSUPPORTED_SELECTOR.test(selector)) {
+        throw new Error(`Filtered content queries do not support stateful selector: ${selector}`);
+      }
+    };
+    return {
+      root,
+      document: inertDocument,
+      capability,
+      selector: capabilitySelector(capability),
+      cloneToLive,
+      liveToClone,
+      original(node) {
+        return cloneToLive.get(node) || null;
+      },
+      cloneOf(node) {
+        return liveToClone.get(node) || null;
+      },
+      query(selector, queryRoot = root) {
+        assertSelector(selector);
+        return Array.from(queryRoot.querySelectorAll(selector), (node) => cloneToLive.get(node) || node);
+      },
+      text(node = root) {
+        const projected = node === root ? root : liveToClone.get(node);
+        return projected?.textContent || "";
+      },
+      html(node = root) {
+        const projected = node === root ? root : liveToClone.get(node);
+        return projected?.innerHTML ?? "";
+      },
+      clone(node = root) {
+        const projected = node === root ? root : liveToClone.get(node);
+        return projected ? inertDocument.importNode(projected, true) : null;
+      }
+    };
+  }
+
   // src/richclay.js
+  var EDITOR_UI_SELECTOR = capabilitySelector("history");
+  function stripIncomingEditorUi(html, doc) {
+    const template = doc.createElement("template");
+    template.innerHTML = String(html || "");
+    for (const node of template.content.querySelectorAll(EDITOR_UI_SELECTOR)) node.remove();
+    return template.innerHTML;
+  }
+  function clipboardHTML(html, doc) {
+    return stripIncomingEditorUi(html, doc);
+  }
+  function clipboardText(html, doc) {
+    const template = doc.createElement("template");
+    template.innerHTML = clipboardHTML(html, doc);
+    const blocks = /* @__PURE__ */ new Set(["ADDRESS", "ARTICLE", "ASIDE", "BLOCKQUOTE", "DIV", "DL", "FIELDSET", "FIGCAPTION", "FIGURE", "FOOTER", "FORM", "H1", "H2", "H3", "H4", "H5", "H6", "HEADER", "HR", "LI", "MAIN", "NAV", "OL", "P", "PRE", "SECTION", "TABLE", "UL"]);
+    let text = "";
+    const visit = (node) => {
+      if (node.nodeType === 3) text += node.data;
+      else if (node.nodeType === 1 && node.tagName === "BR") text += "\n";
+      else {
+        const block = node.nodeType === 1 && blocks.has(node.tagName);
+        if (block && text && !text.endsWith("\n")) text += "\n";
+        for (const child of node.childNodes || []) visit(child);
+        if (block && text && !text.endsWith("\n")) text += "\n";
+      }
+    };
+    visit(template.content);
+    return text.replace(/\n{3,}/g, "\n\n").replace(/^\n|\n$/g, "");
+  }
+  function serializeEditorRoot(root, editor, range = null) {
+    const view = createContentView(root, { capability: "history", inherit: false });
+    const clone = view.root;
+    const boundaryFor = (container, offset) => {
+      while (container && !view.cloneOf(container)) {
+        const parent = container.parentNode;
+        if (!parent) return { container: clone, offset: 0 };
+        offset = Array.from(parent.childNodes).indexOf(container);
+        container = parent;
+      }
+      const projected = view.cloneOf(container) || clone;
+      if (container?.nodeType === 3) return { container: projected, offset: Math.min(offset, projected.length) };
+      const before = Array.from(container?.childNodes || []).slice(0, offset).filter((node) => view.cloneOf(node)).length;
+      return { container: projected, offset: Math.min(before, projected.childNodes.length) };
+    };
+    const insert = (id, container, offset) => {
+      const point = boundaryFor(container, offset);
+      const marker = clone.ownerDocument.createElement("input");
+      marker.id = id;
+      marker.type = "hidden";
+      const markerRange = clone.ownerDocument.createRange();
+      markerRange.setStart(point.container, point.offset);
+      markerRange.collapse(true);
+      markerRange.insertNode(marker);
+    };
+    if (range) {
+      insert(editor.endSelectionId, range.endContainer, range.endOffset);
+      insert(editor.startSelectionId, range.startContainer, range.startOffset);
+    } else {
+      for (const id of [editor.startSelectionId, editor.endSelectionId]) {
+        if (clone.querySelector(`#${id}`)) continue;
+        const marker = root.querySelector(`#${id}`);
+        if (!marker) continue;
+        insert(id, marker.parentNode, Array.from(marker.parentNode.childNodes).indexOf(marker));
+      }
+    }
+    return clone.innerHTML;
+  }
   var instances = /* @__PURE__ */ new WeakMap();
   var autoInitWindows = /* @__PURE__ */ new WeakSet();
   var watchedWindows = /* @__PURE__ */ new WeakSet();
@@ -1731,8 +1952,54 @@ var RichClayBundle = (() => {
       this.liveRegion = createLiveRegion(this.element.ownerDocument);
       this._squire = new Squire(this.element, {
         blockTag: this._blockTag,
+        serializeRoot: serializeEditorRoot,
+        willCutCopy: (html) => clipboardHTML(html, this.element.ownerDocument),
+        toPlainText: (html) => clipboardText(html, this.element.ownerDocument),
+        replaceRoot: (root, html, editor) => {
+          const morph = this.window.clay?.morph || this.window.hyperclay?.morph;
+          if (typeof morph !== "function") {
+            if (root.querySelector('[editor-ui], [clay~="editor-ui"]')) {
+              throw new Error("RichClay requires a retention-aware morph host to replay history containing editor-ui.");
+            }
+            root.innerHTML = html;
+            return;
+          }
+          morph(root, html, {
+            morphStyle: "innerHTML",
+            restoreFocus: false,
+            scripts: { handle: false, merge: false },
+            policy: "history"
+          });
+          editor._ensureBottomLine();
+          editor._mutation?.takeRecords();
+        },
+        onMutations: (records, editor) => {
+          const excluded = (node, capability) => {
+            const boundary = closestWithCapability(node, capability);
+            return !!boundary && boundary !== this.element && this.element.contains(boundary);
+          };
+          let authored = false;
+          let local = false;
+          for (const record of records) {
+            if (excluded(record.target, "history")) continue;
+            const nodes = record.type === "childList" ? [...record.addedNodes, ...record.removedNodes] : [record.target];
+            for (const node of nodes) {
+              if (excluded(node, "history")) continue;
+              if (excluded(record.target, "undo") || excluded(node, "undo")) local = true;
+              else authored = true;
+            }
+          }
+          if (authored) {
+            const ignored = editor._ignoreChange;
+            editor._docWasChanged();
+            if (local && ignored) editor.fireEvent("input");
+          } else if (local) {
+            editor._mayHaveZWS = true;
+            editor.fireEvent("input");
+          } else editor._ignoreChange = false;
+        },
         sanitizeToDOMFragment: (html, editor) => {
-          const fragment = this.sanitizer.sanitizeToDOMFragment(html, editor);
+          const fragment = this.sanitizer.sanitizeToDOMFragment(stripIncomingEditorUi(html, this.element.ownerDocument), editor);
           return this.options.singleLine ? flattenFragmentToSingleLine(fragment) : fragment;
         },
         didError: (error) => {
@@ -2435,8 +2702,9 @@ var RichClayBundle = (() => {
       squire.saveUndoState();
     }
     updatePlaceholder() {
-      const text = (this.element.textContent || "").replace(/\u200B/g, "").trim();
-      const hasMeaningfulElement = this.element.querySelector("img, video, audio, iframe, table");
+      const view = createContentView(this.element, { capability: "history", inherit: false });
+      const text = view.text().replace(/\u200B/g, "").trim();
+      const hasMeaningfulElement = view.root.querySelector("img, video, audio, iframe, table");
       const isEmpty = !text && !hasMeaningfulElement;
       this.element.classList.toggle("richclay-empty", isEmpty);
     }
