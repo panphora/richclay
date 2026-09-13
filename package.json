@@ -32,6 +32,7 @@
     "./styles.css": "./richclay.css"
   },
   "files": [
+    "packed-contract.json",
     "src/**/*.js",
     "richclay.js",
     "richclay.css",
