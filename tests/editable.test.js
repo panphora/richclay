@@ -194,6 +194,29 @@ test("toolbar-on-select hides the floating toolbar until text is selected", () =
   assert.equal(float.style.display, "none");
 });
 
+test("the floating toolbar's placement is inline and !important, so a page rule cannot show or move it", () => {
+  setupDom('<!doctype html><html><body><div editable="toolbar-on-select"><p>Some text</p></div></body></html>');
+  const element = document.querySelector("[editable]");
+  element.getBoundingClientRect = () => ({ top: 100, bottom: 140, left: 50, right: 400 });
+  const editor = new RichClay(element, { Squire: FakeSquire });
+
+  element.dispatchEvent(new window.FocusEvent("focus"));
+  const float = document.querySelector("[data-richclay-float]");
+  assert.equal(float.style.getPropertyValue("display"), "none");
+  assert.equal(float.style.getPropertyPriority("display"), "important");
+
+  const range = document.createRange();
+  const text = element.querySelector("p").firstChild;
+  range.setStart(text, 0);
+  range.setEnd(text, 4);
+  editor.squire.selection = range;
+  editor.squire.fire("select");
+  assert.equal(float.style.getPropertyValue("display"), "");
+  assert.match(float.style.getPropertyValue("transform"), /^translate\(/);
+  assert.equal(float.style.getPropertyPriority("transform"), "important");
+  assert.equal(float.style.getPropertyValue("visibility"), "");
+});
+
 test("Alt+F10 opens and focuses the floating toolbar", () => {
   setupDom('<!doctype html><html><body><div editable><p>x</p></div></body></html>');
   const element = document.querySelector("[editable]");

@@ -58,6 +58,13 @@ export function placeToolbar({ anchor, bar, rail, viewport, current = null }) {
   return { mode: "pinned", x: clampX(bar.width), y: VIEWPORT_INSET };
 }
 
+// The float's placement is inline and !important: a host page's
+// `div { display: block !important }` or `* { transform: none !important }` beats a
+// plain inline style, and would show a hidden toolbar or pin it to the corner.
+function pin(el, prop, value) {
+  el.style.setProperty(prop, value, "important");
+}
+
 export class FloatingToolbar {
   constructor(editor, controls) {
     this.editor = editor;
@@ -103,13 +110,13 @@ export class FloatingToolbar {
   // rail without first switching to it.
   measure() {
     const wasRail = this.root.classList.contains("richclay-float-rail");
-    this.root.style.visibility = "hidden";
+    pin(this.root, "visibility", "hidden");
     this.root.classList.remove("richclay-float-rail");
     this.bar = { width: this.root.offsetWidth || 0, height: this.root.offsetHeight || 0 };
     this.root.classList.add("richclay-float-rail");
     this.rail = { width: this.root.offsetWidth || 0, height: this.root.offsetHeight || 0 };
     this.root.classList.toggle("richclay-float-rail", wasRail);
-    this.root.style.visibility = "";
+    this.root.style.removeProperty("visibility");
   }
 
   schedule() {
@@ -131,7 +138,7 @@ export class FloatingToolbar {
 
   reposition() {
     if (this.hidden) {
-      this.root.style.display = "none";
+      pin(this.root, "display", "none");
       return;
     }
     const anchor = this.editor.element.getBoundingClientRect();
@@ -149,16 +156,16 @@ export class FloatingToolbar {
     this.mode = placement.mode;
 
     if (placement.mode === "hidden") {
-      this.root.style.display = "none";
+      pin(this.root, "display", "none");
       return;
     }
-    this.root.style.display = "";
+    this.root.style.removeProperty("display");
     this.root.classList.toggle(
       "richclay-float-rail",
       placement.mode === "rail-left" || placement.mode === "rail-right"
     );
     this.root.classList.toggle("richclay-float-pinned", placement.mode === "pinned");
-    this.root.style.transform = `translate(${Math.round(placement.x)}px, ${Math.round(placement.y)}px)`;
+    pin(this.root, "transform", `translate(${Math.round(placement.x)}px, ${Math.round(placement.y)}px)`);
   }
 
   destroy() {

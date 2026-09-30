@@ -1241,6 +1241,9 @@ var RichClayBundle = (() => {
     }
     return { mode: "pinned", x: clampX(bar.width), y: VIEWPORT_INSET };
   }
+  function pin(el, prop, value) {
+    el.style.setProperty(prop, value, "important");
+  }
   var FloatingToolbar = class {
     constructor(editor, controls) {
       this.editor = editor;
@@ -1277,13 +1280,13 @@ var RichClayBundle = (() => {
     // rail without first switching to it.
     measure() {
       const wasRail = this.root.classList.contains("richclay-float-rail");
-      this.root.style.visibility = "hidden";
+      pin(this.root, "visibility", "hidden");
       this.root.classList.remove("richclay-float-rail");
       this.bar = { width: this.root.offsetWidth || 0, height: this.root.offsetHeight || 0 };
       this.root.classList.add("richclay-float-rail");
       this.rail = { width: this.root.offsetWidth || 0, height: this.root.offsetHeight || 0 };
       this.root.classList.toggle("richclay-float-rail", wasRail);
-      this.root.style.visibility = "";
+      this.root.style.removeProperty("visibility");
     }
     schedule() {
       if (!this.win.requestAnimationFrame) {
@@ -1302,7 +1305,7 @@ var RichClayBundle = (() => {
     }
     reposition() {
       if (this.hidden) {
-        this.root.style.display = "none";
+        pin(this.root, "display", "none");
         return;
       }
       const anchor = this.editor.element.getBoundingClientRect();
@@ -1319,16 +1322,16 @@ var RichClayBundle = (() => {
       });
       this.mode = placement.mode;
       if (placement.mode === "hidden") {
-        this.root.style.display = "none";
+        pin(this.root, "display", "none");
         return;
       }
-      this.root.style.display = "";
+      this.root.style.removeProperty("display");
       this.root.classList.toggle(
         "richclay-float-rail",
         placement.mode === "rail-left" || placement.mode === "rail-right"
       );
       this.root.classList.toggle("richclay-float-pinned", placement.mode === "pinned");
-      this.root.style.transform = `translate(${Math.round(placement.x)}px, ${Math.round(placement.y)}px)`;
+      pin(this.root, "transform", `translate(${Math.round(placement.x)}px, ${Math.round(placement.y)}px)`);
     }
     destroy() {
       if (this.frame) this.win.cancelAnimationFrame?.(this.frame);
@@ -1608,7 +1611,7 @@ var RichClayBundle = (() => {
     return false;
   }
   function importTree(source, targetDocument, capability, capabilityMatch, exclude, boundary, inherit, maps) {
-    if (source.nodeType === 1 && ((inherit ? hasCapability(source, capability) : matchesWithin(source, capabilityMatch, boundary, false)) || exclude && matchesWithin(source, exclude, boundary, inherit))) return null;
+    if (source.nodeType === 1 && ((inherit ? hasCapability(source, capability) : matchesWithin(source, capabilityMatch, boundary, false)) || exclude && (inherit && source !== boundary ? source.matches(exclude) : matchesWithin(source, exclude, boundary, inherit)))) return null;
     const copy = targetDocument.importNode(source, false);
     maps.cloneToLive.set(copy, source);
     maps.liveToClone.set(source, copy);
