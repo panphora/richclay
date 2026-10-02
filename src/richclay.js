@@ -899,7 +899,8 @@ export default class RichClay {
     this.closeLinkDialog();
 
     const doc = this.element.ownerDocument;
-    const existing = this.currentLinkHref();
+    const existingLink = this.currentLinkElement();
+    const existing = existingLink?.getAttribute("href") || "";
     const dialog = doc.createElement("form");
     const labelId = `richclay-link-label-${++dialogSeq}`;
     dialog.className = "richclay-dialog";
@@ -910,12 +911,13 @@ export default class RichClay {
     markChrome(dialog);
     dialog.setAttribute("save-remove", "");
     dialog.innerHTML = `
-      <div class="richclay-dialog-title" id="${labelId}">${existing ? "Edit link" : "Insert link"}</div>
+      <div class="richclay-dialog-title" id="${labelId}">${existingLink ? "Edit link" : "Insert link"}</div>
       <label class="richclay-field">
         <span>URL</span>
         <input class="richclay-input" name="url" type="text" inputmode="url" autocomplete="url" placeholder="https://example.com">
       </label>
       <div class="richclay-dialog-actions">
+        ${existingLink ? '<button type="button" class="richclay-secondary" data-richclay-remove-link>Remove link</button>' : ""}
         <button type="button" class="richclay-secondary" data-richclay-cancel>Cancel</button>
         <button type="submit" class="richclay-primary">Apply</button>
       </div>
@@ -937,9 +939,24 @@ export default class RichClay {
       }
       this.restoreSelection();
       const anchor = this.currentLinkElement();
-      if (anchor) this.selectElement(anchor);
-      this._squire.makeLink(href);
+      if (anchor) {
+        this.selectElement(anchor);
+        this._squire.saveUndoState();
+        anchor.setAttribute("href", href);
+      } else {
+        this._squire.makeLink(href);
+      }
       announce(this.liveRegion, "Link applied");
+      close();
+    });
+    dialog.querySelector("[data-richclay-remove-link]")?.addEventListener("click", () => {
+      this.restoreSelection();
+      const anchor = this.currentLinkElement();
+      if (anchor) {
+        this.selectElement(anchor);
+        this._squire.removeLink();
+        announce(this.liveRegion, "Link removed");
+      }
       close();
     });
     dialog.querySelector("[data-richclay-cancel]").addEventListener("click", close);
@@ -997,9 +1014,26 @@ export default class RichClay {
 
   currentLinkElement() {
     const range = getSquireSelection(this._squire);
-    let node = range?.commonAncestorContainer || null;
-    if (node && node.nodeType !== 1) node = node.parentElement;
-    return node?.closest?.("a[href]") || null;
+    if (!range || !this.element.contains(range.commonAncestorContainer)) return null;
+    if (range.collapsed) {
+      const node = range.startContainer;
+      const anchor = (node.nodeType === 1 ? node : node.parentElement)?.closest("a[href]");
+      return anchor && anchor !== this.element && this.element.contains(anchor) ? anchor : null;
+    }
+    for (const anchor of this.element.querySelectorAll("a[href]")) {
+      const contents = anchor.ownerDocument.createRange();
+      let first = anchor;
+      let last = anchor;
+      while (first.firstChild) first = first.firstChild;
+      while (last.lastChild) last = last.lastChild;
+      contents.setStart(first, 0);
+      contents.setEnd(last, last.nodeType === 3 ? last.length : last.childNodes.length);
+      if (
+        range.compareBoundaryPoints(range.END_TO_START, contents) < 0 &&
+        range.compareBoundaryPoints(range.START_TO_END, contents) > 0
+      ) return anchor;
+    }
+    return null;
   }
 
   currentLinkHref() {

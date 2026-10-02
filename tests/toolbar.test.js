@@ -226,3 +226,37 @@ test("an inline custom toolbar definition's shortcut is installed", () => {
     .map(c => c[1]);
   assert.equal(keys.includes("Ctrl-e"), true);
 });
+
+// The presets carry one Link control: pressing it opens a form that removes the
+// link, so the separate unlink button is gone from every preset while the
+// registry entry stays for explicit toolbars.
+test("the inline and standard presets leave out unlink and keep link", () => {
+  setupDom('<!doctype html><html><body><div data-richclay><p>x</p></div></body></html>');
+  new RichClay(document.querySelector("[data-richclay]"), { Squire: FakeSquire });
+
+  assert.equal(RichClay.presets.inline.includes("unlink"), false);
+  assert.equal(RichClay.presets.standard.includes("unlink"), false);
+  assert.equal(RichClay.presets.inline.includes("link"), true);
+  assert.equal(RichClay.presets.standard.includes("link"), true);
+
+  const ids = Array.from(document.querySelectorAll("[data-richclay-control]")).map(
+    button => button.dataset.richclayControl
+  );
+  assert.equal(ids.includes("unlink"), false);
+  assert.equal(ids.includes("link"), true);
+});
+
+// A custom toolbar that still lists unlink must keep working, which is why the
+// control is unregistered from the presets and not from the registry.
+test("an explicit unlink toolbar renders the registered control and calls removeLink", () => {
+  setupDom('<!doctype html><html><body><div data-richclay><p>x</p></div></body></html>');
+  const editor = new RichClay(document.querySelector("[data-richclay]"), {
+    Squire: FakeSquire,
+    toolbar: ["unlink"]
+  });
+
+  const unlink = document.querySelector("[data-richclay-control='unlink']");
+  assert.equal(Boolean(unlink), true);
+  unlink.click();
+  assert.equal(editor.squire.commands.includes("removeLink"), true);
+});

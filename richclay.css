@@ -337,6 +337,10 @@
   justify-content: flex-end;
 }
 
+.richclay-dialog-actions [data-richclay-remove-link] {
+  margin-inline-end: auto;
+}
+
 .richclay-primary,
 .richclay-secondary {
   appearance: none;

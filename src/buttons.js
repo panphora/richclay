@@ -37,7 +37,6 @@ export const presets = {
     "strikethrough",
     "code",
     "link",
-    "unlink",
     "undo",
     "redo",
     "clearFormatting"
@@ -50,7 +49,6 @@ export const presets = {
     "strikethrough",
     "code",
     "link",
-    "unlink",
     "unorderedList",
     "orderedList",
     "quote",
@@ -107,7 +105,7 @@ export const defaultButtons = [
     mutates: false,
     isDisabled: notInsideLink,
     run: editor => editor.openLinkDialog(),
-    isActive: editor => editor.selectionHasFormat("A")
+    isActive: editor => Boolean(editor.currentLinkElement())
   },
   {
     id: "unlink",

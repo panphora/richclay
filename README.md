@@ -173,14 +173,14 @@ Options:
 Presets:
 
 - `minimal`: bold, italic, link, unordered list.
-- `inline`: inline formatting, inline code, link, unlink, undo/redo, clear formatting (no block controls).
-- `standard`: block menu, inline formatting, inline code, link, unlink, lists, quote, indent/outdent, undo/redo, clear formatting.
+- `inline`: inline formatting, inline code, link, undo/redo, clear formatting (no block controls).
+- `standard`: block menu, inline formatting, inline code, link, lists, quote, indent/outdent, undo/redo, clear formatting.
 
 Toolbar arrays are the extension surface. Include built-in ids, omit ids to remove buttons, change order to reorder, and use `{ type: "separator" }` for an explicit separator.
 
 Keyboard shortcuts come from the button registry plus your toolbar definitions, so they stay active even with `toolbar: false`. Unregister a button to remove its shortcut.
 
-Built-in control ids are `blockMenu`, `bold`, `italic`, `underline`, `strikethrough`, `code`, `link`, `unlink`, `unorderedList`, `orderedList`, `quote`, `outdent`, `indent`, `undo`, `redo`, and `clearFormatting`.
+Built-in control ids are `blockMenu`, `bold`, `italic`, `underline`, `strikethrough`, `code`, `link`, `unlink`, `unorderedList`, `orderedList`, `quote`, `outdent`, `indent`, `undo`, `redo`, and `clearFormatting`. The `unlink` id stays registered for explicit custom toolbars even though no preset lists it.
 
 ```js
 RichClay.registerButton({
@@ -202,6 +202,12 @@ new RichClay(document.querySelector("[data-richclay]"), {
 ```
 
 Button definitions support `id`, `label`, `ariaLabel`, `icon`, `run(editor)`, `isActive(editor)`, `isDisabled(editor)`, `shortcut`, and `group`. Menu controls use `type: "menu"` with an `options` array. Commands should call Squire APIs; do not use `document.execCommand`.
+
+## Links
+
+RichClay presets offer one Link control. It is pressed whenever the caret is inside an `a[href]` or any part of the selection covers linked content. A caret just outside a link, or a selection that only touches a link's text boundary, leaves the control unpressed. When a selection overlaps more than one link, the form opens the first one in document order. Apply updates that link's URL and preserves the surrounding selection's other text and links.
+
+Pressing the control opens a form with the URL filled in. For an existing link the form shows a **Remove link** button before Cancel and Apply; a form for a new link has none. Remove link deletes the anchor and keeps its text and inline formatting, closes the form, returns focus to the editor, and announces "Link removed".
 
 ## Sanitization
 

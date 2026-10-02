@@ -124,7 +124,7 @@ test("clear formatting keeps the content inside an inline region", () => {
 
 // Unpatched, the walk climbed past the region into the author's own <a> and
 // deleted a link the region only happened to sit inside.
-test("unlink inside an author's <a> leaves that <a> alone", () => {
+test("the registered unlink control inside an author's <a> leaves that <a> alone", () => {
   const { element, editor } = mountMarkup(
     '<div id="host"><a href="/keep">Lead <span editable>Hello world</span> tail</a></div>'
   );
