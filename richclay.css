@@ -110,19 +110,6 @@
   opacity: 0.55;
 }
 
-/* Remove-link icon: the standard link glyph with a diagonal cut painted in the
-   button's own background colour, so the chain reads as severed in every state.
-   The cut tracks the background the button shows: the toolbar surface at rest,
-   the raised surface on hover. */
-.richclay-cut {
-  stroke: var(--richclay-surface-alt);
-}
-
-.richclay-button:hover .richclay-cut,
-.richclay-button[aria-expanded="true"] .richclay-cut {
-  stroke: var(--richclay-surface);
-}
-
 .richclay-separator {
   align-self: stretch;
   background: var(--richclay-border);
@@ -406,9 +393,5 @@
   .richclay-editor:focus-visible,
   .richclay-input:focus-visible {
     outline-color: Highlight;
-  }
-
-  .richclay-cut {
-    stroke: Canvas;
   }
 }
