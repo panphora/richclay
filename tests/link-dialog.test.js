@@ -385,3 +385,128 @@ test("an empty-href link opens Edit link and Remove keeps its text", () => {
   assert.equal(element.innerHTML, "<p>lead one tail</p>");
   assert.equal(dialog(), null);
 });
+
+// Clearing the URL and pressing Apply is the keyboard-first twin of Remove link, so
+// it has to leave the same DOM, focus, announcement and undo state behind. The edited
+// anchor carries inline formatting and a second link sits beside it: only the edited
+// link may lose its anchor, and its bold child and the other link have to survive.
+const formattedLinkHtml =
+  '<p>lead <a href="/one"><b>one</b> first</a> mid <a href="/two">two</a> tail</p>';
+const unlinkedHtml = '<p>lead <b>one</b> first mid <a href="/two">two</a> tail</p>';
+
+test("Apply with an empty URL on a formatted link removes only that link", async () => {
+  const { element, editor } = mount(formattedLinkHtml);
+  await settle();
+  const [one, two] = element.querySelectorAll("a");
+  const bold = element.querySelector("b");
+  const originalHtml = element.innerHTML;
+
+  caretIn(editor, bold.firstChild, 1);
+  assert.equal(pressed(), "true");
+
+  editor.openLinkDialog();
+  const form = dialog();
+  assert.equal(form.querySelector("input").value, "/one");
+  submitForm(form, "");
+
+  assert.equal(element.innerHTML, unlinkedHtml);
+  assert.equal(one.isConnected, false);
+  assert.equal(element.querySelectorAll("a").length, 1);
+  assert.equal(element.querySelector("a"), two);
+  assert.equal(two.getAttribute("href"), "/two");
+  assert.equal(element.querySelector("b"), bold);
+  assert.equal(dialog(), null);
+  assert.equal(document.activeElement, element);
+  assert.equal(pressed(), "false");
+  assert.equal(editor.currentLinkElement(), null);
+
+  assert.equal(editor.liveRegion.textContent, "");
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(editor.liveRegion.textContent, "Link removed");
+
+  editor.squire.undo();
+  assert.equal(element.innerHTML, originalHtml);
+  editor.squire.redo();
+  assert.equal(element.innerHTML, unlinkedHtml);
+});
+
+test("Apply with a whitespace-only URL on a formatted link removes only that link", async () => {
+  const { element, editor } = mount(formattedLinkHtml);
+  await settle();
+  const [, two] = element.querySelectorAll("a");
+  const bold = element.querySelector("b");
+  const originalHtml = element.innerHTML;
+
+  caretIn(editor, bold.firstChild, 1);
+  editor.openLinkDialog();
+  const form = dialog();
+  submitForm(form, "   ");
+
+  assert.equal(element.innerHTML, unlinkedHtml);
+  assert.equal(element.querySelectorAll("a").length, 1);
+  assert.equal(element.querySelector("a"), two);
+  assert.equal(two.textContent, "two");
+  assert.equal(element.querySelector("b"), bold);
+  assert.equal(element.querySelector("b").textContent, "one");
+  assert.equal(dialog(), null);
+  assert.equal(document.activeElement, element);
+
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(editor.liveRegion.textContent, "Link removed");
+
+  editor.squire.undo();
+  assert.equal(element.innerHTML, originalHtml);
+});
+
+// An unsafe URL is not a request to unlink: the rejection path has to win, because
+// the link survives and the form stays open for a correction.
+test("Apply with an unsafe URL on a formatted link keeps the link and the dialog", async () => {
+  const { element, editor } = mount(formattedLinkHtml);
+  await settle();
+  const [one, two] = element.querySelectorAll("a");
+  const originalHtml = element.innerHTML;
+
+  caretIn(editor, one.querySelector("b").firstChild, 1);
+  editor.openLinkDialog();
+  const form = dialog();
+  submitForm(form, "javascript:alert(1)");
+
+  assert.equal(element.innerHTML, originalHtml);
+  assert.equal(element.querySelector("a"), one);
+  assert.equal(one.getAttribute("href"), "/one");
+  assert.equal(element.querySelectorAll("a").length, 2);
+  assert.equal(two.getAttribute("href"), "/two");
+  assert.equal(dialog(), form);
+  assert.equal(form.querySelector("input").value, "javascript:alert(1)");
+
+  assert.equal(editor.liveRegion.textContent, "");
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(editor.liveRegion.textContent, "Enter a valid URL");
+});
+
+// With no existing link there is nothing to remove, so a blank URL keeps the dialog
+// open and inserts no anchor, blank or otherwise.
+test("Apply with a blank URL on a new link keeps the dialog and inserts nothing", async () => {
+  const { element, editor } = mount("<p>lead tail</p>");
+  await settle();
+  const originalHtml = element.innerHTML;
+
+  caretIn(editor, element.querySelector("p").firstChild, 2);
+  editor.openLinkDialog();
+  const form = dialog();
+  assert.equal(form.querySelector(".richclay-dialog-title").textContent, "Insert link");
+  assert.equal(form.querySelector("[data-richclay-remove-link]"), null);
+
+  submitForm(form, "");
+  assert.equal(element.querySelectorAll("a").length, 0);
+  assert.equal(element.innerHTML, originalHtml);
+  assert.equal(dialog(), form);
+
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(editor.liveRegion.textContent, "Enter a valid URL");
+
+  submitForm(form, "   ");
+  assert.equal(element.querySelectorAll("a").length, 0);
+  assert.equal(element.innerHTML, originalHtml);
+  assert.equal(dialog(), form);
+});

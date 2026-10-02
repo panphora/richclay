@@ -2390,10 +2390,25 @@ var RichClayBundle = (() => {
         this.toolbar?.update();
         this.focus();
       };
+      const remove = () => {
+        this.restoreSelection();
+        const anchor = this.currentLinkElement();
+        if (anchor) {
+          this.selectElement(anchor);
+          this._squire.removeLink();
+          announce(this.liveRegion, "Link removed");
+        }
+        close();
+      };
       dialog.addEventListener("submit", (event) => {
         event.preventDefault();
         const data = new FormData(dialog);
-        const href = normalizeUrl(data.get("url"));
+        const value = String(data.get("url") || "").trim();
+        if (!value && existingLink) {
+          remove();
+          return;
+        }
+        const href = normalizeUrl(value);
         if (!href) {
           announce(this.liveRegion, "Enter a valid URL");
           return;
@@ -2410,16 +2425,7 @@ var RichClayBundle = (() => {
         announce(this.liveRegion, "Link applied");
         close();
       });
-      dialog.querySelector("[data-richclay-remove-link]")?.addEventListener("click", () => {
-        this.restoreSelection();
-        const anchor = this.currentLinkElement();
-        if (anchor) {
-          this.selectElement(anchor);
-          this._squire.removeLink();
-          announce(this.liveRegion, "Link removed");
-        }
-        close();
-      });
+      dialog.querySelector("[data-richclay-remove-link]")?.addEventListener("click", remove);
       dialog.querySelector("[data-richclay-cancel]").addEventListener("click", close);
       dialog.addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
