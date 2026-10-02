@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { setupRealSquire } from './real-squire.js'
 import RichClay from '../src/richclay.js'
-import { morph } from '../../hyper-morph/src/hyper-morph.js'
+import { morph } from '../../hyper-morph/src/index.js'
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 10))
 
