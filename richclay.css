@@ -11,6 +11,7 @@
   --richclay-radius: 6px;
   --richclay-control-size: 34px;
   --richclay-shadow: 0 10px 24px rgb(15 23 42 / 0.16);
+  --richclay-dialog-arrow: 28px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -252,10 +253,6 @@
   margin-block: 0;
 }
 
-.richclay-float .richclay-dialog {
-  margin-block: 6px 0;
-}
-
 /* Compact vertical rail for narrow margins. */
 .richclay-float-rail .richclay-toolbar {
   --richclay-control-size: 28px;
@@ -317,8 +314,9 @@
   color: var(--richclay-text);
   display: grid;
   gap: 10px;
-  margin-block: 6px;
-  max-width: 420px;
+  box-sizing: border-box;
+  width: min(420px, calc(100vw - 16px));
+  z-index: 99999;
   padding: 12px;
 }
 

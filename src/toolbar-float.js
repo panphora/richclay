@@ -58,10 +58,28 @@ export function placeToolbar({ anchor, bar, rail, viewport, current = null }) {
   return { mode: "pinned", x: clampX(bar.width), y: VIEWPORT_INSET };
 }
 
+// Where a popover sits beside an anchor rect: below by default, above when only
+// above fits, clamped inside the viewport. `arrow` is the anchor's center measured
+// from the popover's left edge, kept off the corners, for skins that draw a pointer.
+export const POPOVER_GAP = 10;
+export const POPOVER_ARROW_INSET = 28;
+
+export function placePopover({ anchor, box, viewport, gap = POPOVER_GAP }) {
+  const spaceBelow = viewport.height - VIEWPORT_INSET - anchor.bottom - gap;
+  const spaceAbove = anchor.top - gap - VIEWPORT_INSET;
+  const side = spaceBelow >= box.height || spaceBelow >= spaceAbove ? "below" : "above";
+  const rawY = side === "below" ? anchor.bottom + gap : anchor.top - gap - box.height;
+  const y = Math.max(VIEWPORT_INSET, Math.min(rawY, viewport.height - VIEWPORT_INSET - box.height));
+  const center = (anchor.left + anchor.right) / 2;
+  const x = Math.max(VIEWPORT_INSET, Math.min(center - POPOVER_ARROW_INSET, viewport.width - VIEWPORT_INSET - box.width));
+  const arrow = Math.max(14, Math.min(center - x, box.width - 14));
+  return { side, x, y, arrow };
+}
+
 // The float's placement is inline and !important: a host page's
 // `div { display: block !important }` or `* { transform: none !important }` beats a
 // plain inline style, and would show a hidden toolbar or pin it to the corner.
-function pin(el, prop, value) {
+export function pin(el, prop, value) {
   el.style.setProperty(prop, value, "important");
 }
 

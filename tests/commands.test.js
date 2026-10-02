@@ -455,3 +455,34 @@ test("link dialog closes on Escape and returns focus to the editor", () => {
   assert.equal(document.querySelector("[data-richclay-dialog]"), null);
   assert.equal(editor.squire.focused, true);
 });
+
+test("link dialog floats in the body and closes on an outside pointerdown", () => {
+  setupDom('<!doctype html><html><body><div data-richclay><p>x</p></div><p id="outside">y</p></body></html>');
+  const editor = new RichClay(document.querySelector("[data-richclay]"), {
+    Squire: FakeSquire,
+    toolbar: ["link"]
+  });
+
+  editor.openLinkDialog();
+  const dialog = document.querySelector("[data-richclay-dialog]");
+  assert.equal(dialog.parentElement, document.body);
+  assert.equal(dialog.style.getPropertyValue("position"), "fixed");
+  assert.equal(dialog.getAttribute("data-richclay-side") !== null, true);
+
+  dialog.querySelector("input").dispatchEvent(new window.Event("pointerdown", { bubbles: true }));
+  assert.equal(document.querySelector("[data-richclay-dialog]"), dialog);
+
+  document.getElementById("outside").dispatchEvent(new window.Event("pointerdown", { bubbles: true }));
+  assert.equal(document.querySelector("[data-richclay-dialog]"), null);
+});
+
+test("link dialog mounts inside the editor's own dialog, so a modal cannot make it inert", () => {
+  setupDom('<!doctype html><html><body><dialog open><div data-richclay><p>x</p></div></dialog></body></html>');
+  const editor = new RichClay(document.querySelector("[data-richclay]"), {
+    Squire: FakeSquire,
+    toolbar: ["link"]
+  });
+
+  editor.openLinkDialog();
+  assert.equal(document.querySelector("[data-richclay-dialog]").parentElement, document.querySelector("dialog"));
+});

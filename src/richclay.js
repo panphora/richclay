@@ -20,7 +20,7 @@ import {
   unsupportedRootReason
 } from "./normalize.js";
 import { Toolbar } from "./toolbar.js";
-import { FloatingToolbar } from "./toolbar-float.js";
+import { FloatingToolbar, pin, placePopover } from "./toolbar-float.js";
 import {
   createSanitizer,
   flattenFragmentToSingleLine,
@@ -182,6 +182,7 @@ export default class RichClay {
     this.liveRegion = null;
     this.description = null;
     this.dialog = null;
+    this.dialogCleanup = null;
     this.savedSelection = null;
     this.path = "";
     this.active = false;
@@ -907,6 +908,7 @@ export default class RichClay {
     dialog.setAttribute("aria-labelledby", labelId);
     dialog.setAttribute("data-richclay-dialog", "");
     markChrome(dialog);
+    dialog.setAttribute("save-remove", "");
     dialog.innerHTML = `
       <div class="richclay-dialog-title" id="${labelId}">${existing ? "Edit link" : "Insert link"}</div>
       <label class="richclay-field">
@@ -950,9 +952,41 @@ export default class RichClay {
       }
     });
 
-    const mount = this.toolbar?.root || this.element;
-    mount.insertAdjacentElement("afterend", dialog);
+    // A modal <dialog> makes everything outside it inert, so the form mounts inside
+    // the editor's own dialog when it has one. As a manual popover it renders in the
+    // top layer, where no transformed or clipping ancestor can move or cut it.
+    const host = this.element.closest("dialog") || doc.body;
+    const layered = typeof dialog.showPopover === "function";
+    if (layered) dialog.setAttribute("popover", "manual");
+    pin(dialog, "position", "fixed");
+    pin(dialog, "inset", "0px auto auto 0px");
+    pin(dialog, "margin", "0");
+    pin(dialog, "overflow", "visible");
+    host.appendChild(dialog);
+    if (layered) dialog.showPopover();
     this.dialog = dialog;
+
+    const win = doc.defaultView || globalThis;
+    const reposition = () => this.positionLinkDialog();
+    const dismiss = event => {
+      if (!dialog.contains(event.target)) this.closeLinkDialog();
+    };
+    const resizeObserver = typeof win.ResizeObserver === "function" ? new win.ResizeObserver(reposition) : null;
+    resizeObserver?.observe(dialog);
+    doc.addEventListener("scroll", reposition, { capture: true, passive: true });
+    win.addEventListener("resize", reposition, { passive: true });
+    win.visualViewport?.addEventListener("resize", reposition, { passive: true });
+    win.visualViewport?.addEventListener("scroll", reposition, { passive: true });
+    doc.addEventListener("pointerdown", dismiss, true);
+    this.dialogCleanup = () => {
+      resizeObserver?.disconnect();
+      doc.removeEventListener("scroll", reposition, { capture: true });
+      win.removeEventListener("resize", reposition);
+      win.visualViewport?.removeEventListener("resize", reposition);
+      win.visualViewport?.removeEventListener("scroll", reposition);
+      doc.removeEventListener("pointerdown", dismiss, true);
+    };
+    this.positionLinkDialog();
 
     const input = dialog.querySelector("input");
     input.value = existing;
@@ -981,7 +1015,38 @@ export default class RichClay {
     return range;
   }
 
+  // The selected text, or the caret, as the dialog's anchor. A saved range keeps
+  // tracking the text it covers, so this stays right as the page scrolls.
+  linkAnchorRect() {
+    const range = this.savedSelection;
+    if (typeof range?.getClientRects === "function") {
+      const rects = [...range.getClientRects()].filter(rect => rect.width || rect.height);
+      if (rects.length) return range.collapsed ? rects[0] : range.getBoundingClientRect();
+    }
+    const button = this.toolbar?.items.find(item => item.def.id === "link")?.button;
+    return (button || this.toolbar?.root || this.element).getBoundingClientRect();
+  }
+
+  positionLinkDialog() {
+    const dialog = this.dialog;
+    if (!dialog) return;
+    const win = dialog.ownerDocument.defaultView || globalThis;
+    const placement = placePopover({
+      anchor: this.linkAnchorRect(),
+      box: { width: dialog.offsetWidth || 0, height: dialog.offsetHeight || 0 },
+      viewport: {
+        width: win.visualViewport?.width ?? win.innerWidth,
+        height: win.visualViewport?.height ?? win.innerHeight
+      }
+    });
+    dialog.setAttribute("data-richclay-side", placement.side);
+    dialog.style.setProperty("--richclay-dialog-arrow", `${Math.round(placement.arrow)}px`);
+    pin(dialog, "transform", `translate(${Math.round(placement.x)}px, ${Math.round(placement.y)}px)`);
+  }
+
   closeLinkDialog() {
+    this.dialogCleanup?.();
+    this.dialogCleanup = null;
     this.dialog?.remove();
     this.dialog = null;
   }

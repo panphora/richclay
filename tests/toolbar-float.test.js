@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { placeToolbar } from "../src/toolbar-float.js";
+import { placeToolbar, placePopover } from "../src/toolbar-float.js";
 
 const viewport = { width: 1000, height: 800 };
 const bar = { width: 400, height: 40 };
@@ -76,4 +76,26 @@ test("clamps x to the viewport for wide toolbars", () => {
   const placement = placeToolbar({ anchor: anchor(200, 600, 800, 950), bar, rail, viewport });
   assert.equal(placement.mode, "above");
   assert.equal(placement.x, 1000 - 400 - 8);
+});
+
+const box = { width: 360, height: 180 };
+
+test("popover opens below the anchor with its arrow on the anchor's center", () => {
+  const placement = placePopover({ anchor: { top: 300, bottom: 320, left: 400, right: 500 }, box, viewport });
+  assert.equal(placement.side, "below");
+  assert.equal(placement.y, 320 + 10);
+  assert.equal(placement.x, 450 - 28);
+  assert.equal(placement.arrow, 28);
+});
+
+test("popover flips above when only above fits", () => {
+  const placement = placePopover({ anchor: { top: 700, bottom: 720, left: 400, right: 500 }, box, viewport });
+  assert.equal(placement.side, "above");
+  assert.equal(placement.y, 700 - 10 - 180);
+});
+
+test("popover stays inside the viewport and its arrow still points at the anchor", () => {
+  const placement = placePopover({ anchor: { top: 300, bottom: 320, left: 960, right: 990 }, box, viewport });
+  assert.equal(placement.x, 1000 - 8 - 360);
+  assert.equal(placement.arrow, 975 - placement.x);
 });
