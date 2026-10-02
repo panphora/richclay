@@ -1241,6 +1241,19 @@ var RichClayBundle = (() => {
     }
     return { mode: "pinned", x: clampX(bar.width), y: VIEWPORT_INSET };
   }
+  var POPOVER_GAP = 10;
+  var POPOVER_ARROW_INSET = 28;
+  function placePopover({ anchor, box, viewport, gap = POPOVER_GAP }) {
+    const spaceBelow = viewport.height - VIEWPORT_INSET - anchor.bottom - gap;
+    const spaceAbove = anchor.top - gap - VIEWPORT_INSET;
+    const side = spaceBelow >= box.height || spaceBelow >= spaceAbove ? "below" : "above";
+    const rawY = side === "below" ? anchor.bottom + gap : anchor.top - gap - box.height;
+    const y = Math.max(VIEWPORT_INSET, Math.min(rawY, viewport.height - VIEWPORT_INSET - box.height));
+    const center = (anchor.left + anchor.right) / 2;
+    const x = Math.max(VIEWPORT_INSET, Math.min(center - POPOVER_ARROW_INSET, viewport.width - VIEWPORT_INSET - box.width));
+    const arrow = Math.max(14, Math.min(center - x, box.width - 14));
+    return { side, x, y, arrow };
+  }
   function pin(el, prop, value) {
     el.style.setProperty(prop, value, "important");
   }
@@ -1798,6 +1811,7 @@ var RichClayBundle = (() => {
       this.liveRegion = null;
       this.description = null;
       this.dialog = null;
+      this.dialogCleanup = null;
       this.savedSelection = null;
       this.path = "";
       this.active = false;
@@ -2363,6 +2377,7 @@ var RichClayBundle = (() => {
       dialog.setAttribute("aria-labelledby", labelId);
       dialog.setAttribute("data-richclay-dialog", "");
       markChrome(dialog);
+      dialog.setAttribute("save-remove", "");
       dialog.innerHTML = `
       <div class="richclay-dialog-title" id="${labelId}">${existing ? "Edit link" : "Insert link"}</div>
       <label class="richclay-field">
@@ -2403,9 +2418,37 @@ var RichClayBundle = (() => {
           trapTab(event, dialog);
         }
       });
-      const mount = this.toolbar?.root || this.element;
-      mount.insertAdjacentElement("afterend", dialog);
+      const host = this.element.closest("dialog") || doc.body;
+      const layered = typeof dialog.showPopover === "function";
+      if (layered) dialog.setAttribute("popover", "manual");
+      pin(dialog, "position", "fixed");
+      pin(dialog, "inset", "0px auto auto 0px");
+      pin(dialog, "margin", "0");
+      pin(dialog, "overflow", "visible");
+      host.appendChild(dialog);
+      if (layered) dialog.showPopover();
       this.dialog = dialog;
+      const win = doc.defaultView || globalThis;
+      const reposition = () => this.positionLinkDialog();
+      const dismiss = (event) => {
+        if (!dialog.contains(event.target)) this.closeLinkDialog();
+      };
+      const resizeObserver = typeof win.ResizeObserver === "function" ? new win.ResizeObserver(reposition) : null;
+      resizeObserver?.observe(dialog);
+      doc.addEventListener("scroll", reposition, { capture: true, passive: true });
+      win.addEventListener("resize", reposition, { passive: true });
+      win.visualViewport?.addEventListener("resize", reposition, { passive: true });
+      win.visualViewport?.addEventListener("scroll", reposition, { passive: true });
+      doc.addEventListener("pointerdown", dismiss, true);
+      this.dialogCleanup = () => {
+        resizeObserver?.disconnect();
+        doc.removeEventListener("scroll", reposition, { capture: true });
+        win.removeEventListener("resize", reposition);
+        win.visualViewport?.removeEventListener("resize", reposition);
+        win.visualViewport?.removeEventListener("scroll", reposition);
+        doc.removeEventListener("pointerdown", dismiss, true);
+      };
+      this.positionLinkDialog();
       const input = dialog.querySelector("input");
       input.value = existing;
       input.focus();
@@ -2429,7 +2472,36 @@ var RichClayBundle = (() => {
       this.saveSelection();
       return range;
     }
+    // The selected text, or the caret, as the dialog's anchor. A saved range keeps
+    // tracking the text it covers, so this stays right as the page scrolls.
+    linkAnchorRect() {
+      const range = this.savedSelection;
+      if (typeof range?.getClientRects === "function") {
+        const rects = [...range.getClientRects()].filter((rect) => rect.width || rect.height);
+        if (rects.length) return range.collapsed ? rects[0] : range.getBoundingClientRect();
+      }
+      const button = this.toolbar?.items.find((item) => item.def.id === "link")?.button;
+      return (button || this.toolbar?.root || this.element).getBoundingClientRect();
+    }
+    positionLinkDialog() {
+      const dialog = this.dialog;
+      if (!dialog) return;
+      const win = dialog.ownerDocument.defaultView || globalThis;
+      const placement = placePopover({
+        anchor: this.linkAnchorRect(),
+        box: { width: dialog.offsetWidth || 0, height: dialog.offsetHeight || 0 },
+        viewport: {
+          width: win.visualViewport?.width ?? win.innerWidth,
+          height: win.visualViewport?.height ?? win.innerHeight
+        }
+      });
+      dialog.setAttribute("data-richclay-side", placement.side);
+      dialog.style.setProperty("--richclay-dialog-arrow", `${Math.round(placement.arrow)}px`);
+      pin(dialog, "transform", `translate(${Math.round(placement.x)}px, ${Math.round(placement.y)}px)`);
+    }
     closeLinkDialog() {
+      this.dialogCleanup?.();
+      this.dialogCleanup = null;
       this.dialog?.remove();
       this.dialog = null;
     }
@@ -2820,6 +2892,7 @@ var RichClayBundle = (() => {
   --richclay-radius: 6px;
   --richclay-control-size: 34px;
   --richclay-shadow: 0 10px 24px rgb(15 23 42 / 0.16);
+  --richclay-dialog-arrow: 28px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -3061,10 +3134,6 @@ var RichClayBundle = (() => {
   margin-block: 0;
 }
 
-.richclay-float .richclay-dialog {
-  margin-block: 6px 0;
-}
-
 /* Compact vertical rail for narrow margins. */
 .richclay-float-rail .richclay-toolbar {
   --richclay-control-size: 28px;
@@ -3126,8 +3195,9 @@ var RichClayBundle = (() => {
   color: var(--richclay-text);
   display: grid;
   gap: 10px;
-  margin-block: 6px;
-  max-width: 420px;
+  box-sizing: border-box;
+  width: min(420px, calc(100vw - 16px));
+  z-index: 99999;
   padding: 12px;
 }
 
