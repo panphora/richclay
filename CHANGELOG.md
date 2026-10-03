@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- Use the selected house pilcrow and clear-formatting toolbar icons, and add paragraph, heading, quote, and code icons to the block-style menu. Other toolbar icons retain their Phosphor regular drawings.
+
 ## [0.5.0] - 2026-09-04
 
 ### Fixed

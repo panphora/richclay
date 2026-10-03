@@ -161,7 +161,8 @@ export class Toolbar {
       item.setAttribute("tabindex", "-1");
       item.dataset.richclayMenuItem = def.id;
       item.dataset.richclayOptionIndex = String(optionIndex);
-      item.textContent = option.label;
+      item.innerHTML = option.icon || "";
+      item.appendChild(doc.createTextNode(option.label));
       item.addEventListener("mousedown", preservePointerSelection);
       item.addEventListener("click", event => {
         event.preventDefault();

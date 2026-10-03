@@ -1,4 +1,4 @@
-// Phosphor regular toolbar icons.
+// Phosphor regular toolbar icons with selected house-style replacements.
 const svg = (inner, viewBox = "0 0 18 18") =>
   `<svg viewBox="${viewBox}" width="18" height="18" aria-hidden="true" focusable="false">${inner}</svg>`;
 
@@ -14,11 +14,14 @@ const icons = {
   quote: svg(`<path fill="currentColor" d="M100,56H40A16,16,0,0,0,24,72v64a16,16,0,0,0,16,16h60v8a32,32,0,0,1-32,32,8,8,0,0,0,0,16,48.05,48.05,0,0,0,48-48V72A16,16,0,0,0,100,56Zm0,80H40V72h60ZM216,56H156a16,16,0,0,0-16,16v64a16,16,0,0,0,16,16h60v8a32,32,0,0,1-32,32,8,8,0,0,0,0,16,48.05,48.05,0,0,0,48-48V72A16,16,0,0,0,216,56Zm0,80H156V72h60Z"/>`, "0 0 256 256"),
   undo: svg(`<path fill="currentColor" d="M224,128a96,96,0,0,1-94.71,96H128A95.38,95.38,0,0,1,62.1,197.8a8,8,0,0,1,11-11.63A80,80,0,1,0,71.43,71.39a3.07,3.07,0,0,1-.26.25L44.59,96H72a8,8,0,0,1,0,16H24a8,8,0,0,1-8-8V56a8,8,0,0,1,16,0V85.8L60.25,60A96,96,0,0,1,224,128Z"/>`, "0 0 256 256"),
   redo: svg(`<path fill="currentColor" d="M240,56v48a8,8,0,0,1-8,8H184a8,8,0,0,1,0-16H211.4L184.81,71.64l-.25-.24a80,80,0,1,0-1.67,114.78,8,8,0,0,1,11,11.63A95.44,95.44,0,0,1,128,224h-1.32A96,96,0,1,1,195.75,60L224,85.8V56a8,8,0,1,1,16,0Z"/>`, "0 0 256 256"),
-  clear: svg(`<path fill="currentColor" d="M213.38,221.92a8,8,0,0,1-11.3-.54L136,148.69V192h24a8,8,0,0,1,0,16H96a8,8,0,0,1,0-16h24V131.09L64,69.49V88a8,8,0,0,1-16,0V56a8,8,0,0,1,.72-3.31l-6.64-7.31A8,8,0,1,1,53.92,34.62l160,176A8,8,0,0,1,213.38,221.92ZM105.79,64H120V80.43a8,8,0,0,0,16,0V64h56V88a8,8,0,0,0,16,0V56a8,8,0,0,0-8-8H105.79a8,8,0,0,0,0,16Z"/>`, "0 0 256 256"),
+  clear: svg(`<path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" stroke-linejoin="miter" d="M3 3l18 18M5 5v3M9 5h10v3M12 5v3M12 12v7M8 19h8"/>`, "0 0 24 24"),
   code: svg(`<path fill="currentColor" d="M69.12,94.15,28.5,128l40.62,33.85a8,8,0,1,1-10.24,12.29l-48-40a8,8,0,0,1,0-12.29l48-40a8,8,0,0,1,10.24,12.3Zm176,27.7-48-40a8,8,0,1,0-10.24,12.3L227.5,128l-40.62,33.85a8,8,0,1,0,10.24,12.29l48-40a8,8,0,0,0,0-12.29ZM162.73,32.48a8,8,0,0,0-10.25,4.79l-64,176a8,8,0,0,0,4.79,10.26A8.14,8.14,0,0,0,96,224a8,8,0,0,0,7.52-5.27l64-176A8,8,0,0,0,162.73,32.48Z"/>`, "0 0 256 256"),
   indent: svg(`<path fill="currentColor" d="M224,128a8,8,0,0,1-8,8H112a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128ZM112,72H216a8,8,0,0,0,0-16H112a8,8,0,0,0,0,16ZM216,184H40a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16ZM34.34,141.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0,0-11.32l-40-40A8,8,0,0,0,34.34,61.66L68.69,96,34.34,130.34A8,8,0,0,0,34.34,141.66Z"/>`, "0 0 256 256"),
   outdent: svg(`<path fill="currentColor" d="M224,128a8,8,0,0,1-8,8H112a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128ZM112,72H216a8,8,0,0,0,0-16H112a8,8,0,0,0,0,16ZM216,184H40a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16ZM72,144a8,8,0,0,0,5.66-13.66L43.31,96,77.66,61.66A8,8,0,0,0,66.34,50.34l-40,40a8,8,0,0,0,0,11.32l40,40A8,8,0,0,0,72,144Z"/>`, "0 0 256 256"),
-  blocks: svg(`<path fill="currentColor" d="M208,40H96a64,64,0,0,0,0,128h40v40a8,8,0,0,0,16,0V56h24V208a8,8,0,0,0,16,0V56h16a8,8,0,0,0,0-16ZM136,152H96a48,48,0,0,1,0-96h40Z"/>`, "0 0 256 256")
+  blocks: svg(`<path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" stroke-linejoin="miter" d="M19 4h-9a4.5 4.5 0 0 0 0 9h3M13 4v16M17 4v16"/>`, "0 0 24 24"),
+  h1: svg(`<path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M3.5 5.5v12M12 5.5v12M3.5 11.5H12M17 12l3-2v10"/>`, "0 0 24 24"),
+  h2: svg(`<path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M3.5 5.5v12M12 5.5v12M3.5 11.5H12M16 12.5c0-3.5 6-3.5 6 0 0 2-2.5 3.5-6 7.5h6"/>`, "0 0 24 24"),
+  h3: svg(`<path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M3.5 5.5v12M12 5.5v12M3.5 11.5H12M16 11c1.5-1.5 6-1.5 6 1.5 0 1.5-1.5 2.5-3 2.5h-1M19 15c1.5 0 3 1 3 2.5 0 3-4.5 3-6 1.5"/>`, "0 0 24 24")
 };
 
 const blocksOnly = editor => editor.blocksStayOut();
@@ -186,12 +189,13 @@ export const defaultButtons = [
     group: "blocks",
     isDisabled: blocksOnly,
     options: [
-      blockOption("Paragraph", "P"),
-      blockOption("Heading 1", "H1"),
-      blockOption("Heading 2", "H2"),
-      blockOption("Heading 3", "H3"),
+      blockOption("Paragraph", "P", icons.blocks),
+      blockOption("Heading 1", "H1", icons.h1),
+      blockOption("Heading 2", "H2", icons.h2),
+      blockOption("Heading 3", "H3", icons.h3),
       {
         label: "Quote",
+        icon: icons.quote,
         value: "BLOCKQUOTE",
         isDisabled: blocksOnly,
         run: editor => editor.squire.increaseQuoteLevel(),
@@ -199,6 +203,7 @@ export const defaultButtons = [
       },
       {
         label: "Code block",
+        icon: icons.code,
         value: "PRE",
         isDisabled: blocksOnly,
         run: editor => editor.setBlockType("PRE"),
@@ -231,9 +236,10 @@ function labelTag(id) {
   }[id];
 }
 
-function blockOption(label, tag) {
+function blockOption(label, tag, icon) {
   return {
     label,
+    icon,
     value: tag,
     isDisabled: blocksOnly,
     run: editor => editor.setBlockType(tag),
