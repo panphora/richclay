@@ -1834,6 +1834,15 @@ var RichClayBundle = (() => {
         this.element.classList.remove("richclay-focused");
         if (this.options.inline) this.scheduleFloatTeardown(event);
       };
+      this._onLinkActivation = (event) => {
+        if (!this.active || this.options.readOnly) return;
+        const target = event.target?.nodeType === 1 ? event.target : event.target?.parentElement;
+        const anchor = target?.closest("a[href]");
+        if (!anchor) return;
+        const chrome = closestWithCapability(target, "history");
+        if (chrome && chrome !== this.element && this.element.contains(chrome) && chrome.contains(anchor)) return;
+        event.preventDefault();
+      };
       this.ensureMarker();
       this.hyperclay = shouldUseHyperclay(this.options, this.window);
       if (this.hyperclay) installHyperclayBridge(this.window);
@@ -2595,11 +2604,15 @@ var RichClayBundle = (() => {
       }
       this.element.addEventListener("focus", this._onFocus);
       this.element.addEventListener("blur", this._onBlur);
+      this.element.addEventListener("click", this._onLinkActivation, true);
+      this.element.addEventListener("auxclick", this._onLinkActivation, true);
     }
     cleanupEditorAttributes() {
       removeRuntimeState(this.element, "destroy");
       this.element.removeEventListener("focus", this._onFocus);
       this.element.removeEventListener("blur", this._onBlur);
+      this.element.removeEventListener("click", this._onLinkActivation, true);
+      this.element.removeEventListener("auxclick", this._onLinkActivation, true);
     }
     bindSquire() {
       const input = () => {
