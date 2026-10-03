@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.6.0] - 2026-10-03
+
+### Changed
+- Apply finalized RichClay toolbar and menu icons
+- Remove existing links when their URL is cleared
+- Move link removal into the link dialog
+- Remove retired RichClay icon styles
+- Adopt Phosphor toolbar icons
+- Rebuild dist bundle for the floating link dialog
+- Float the link dialog as a positioned popover
+
+### Fixed
+- Prevent link navigation while editing in RichClay
+- Copy checked, selected, and file input state correctly
+- Import hyper-morph from its index in the editor UI test
+- Write the floating toolbar's placement inline with !important
+- Check a descendant's own region marker on the element itself, synced from ClayJS content-dom.js
+
+
+
 ## [Unreleased]
 
 ### Fixed
