@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.1] - 2026-10-15
+
+### Changed
+- Synced content-dom.js and region-capabilities.js with the latest ClayJS versions
+
+### Fixed
+- A select with an excluded option now keeps its selection in the content view
+
+
+
 ## [0.6.0] - 2026-10-03
 
 ### Changed
