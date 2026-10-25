@@ -1786,13 +1786,16 @@ var RichClayBundle = (() => {
     return clone.innerHTML;
   }
   var instances = /* @__PURE__ */ new WeakMap();
-  var autoInitWindows = /* @__PURE__ */ new WeakSet();
-  var watchedWindows = /* @__PURE__ */ new WeakSet();
+  var autoInitWindows = /* @__PURE__ */ new WeakMap();
+  var watchedWindows = /* @__PURE__ */ new WeakMap();
   var globalRegistry = createDefaultRegistry();
   var KEEP_FOCUS = Symbol("richclay-keep-focus");
   var ROOT_TRANSFER_EVENTS = ["cut", "paste", "drop"];
   var MODIFIER_ORDER = ["Alt", "Ctrl", "Meta", "Shift"];
   var dialogSeq = 0;
+  function isManagedByClayJS(win) {
+    return typeof win.clay?.mode === "string";
+  }
   var defaultOptions = {
     toolbar: "standard",
     toolbarContainer: null,
@@ -1886,23 +1889,36 @@ var RichClayBundle = (() => {
       return elements.map((element) => new _RichClay(element, options));
     }
     static autoInit(win = typeof window !== "undefined" ? window : void 0) {
-      if (!win || !win.document || autoInitWindows.has(win)) return;
-      autoInitWindows.add(win);
+      if (!win || !win.document) return () => {
+      };
+      const existing = autoInitWindows.get(win);
+      if (existing) return existing;
+      let cancelled = false;
+      let stopWatching = null;
       const run = () => {
+        if (cancelled || isManagedByClayJS(win)) return;
         if (shouldUseHyperclay({}, win) && isHyperclayEditMode(win)) {
           _RichClay.init();
-          _RichClay.watch(win);
+          stopWatching = _RichClay.watch(win);
         }
       };
+      const stop = () => {
+        cancelled = true;
+        stopWatching?.();
+      };
+      autoInitWindows.set(win, stop);
       if (win.document.readyState === "loading") {
         win.document.addEventListener("DOMContentLoaded", run, { once: true });
       } else {
         run();
       }
+      return stop;
     }
     static watch(win = typeof window !== "undefined" ? window : void 0, options = {}) {
-      if (!win || !win.document || watchedWindows.has(win)) return;
-      watchedWindows.add(win);
+      if (!win || !win.document) return () => {
+      };
+      const existing = watchedWindows.get(win);
+      if (existing) return existing;
       const mount = (element) => {
         if (!isMountable(element)) return;
         if (!instances.has(element) && !conflictsWithExistingEditor(element)) new _RichClay(element, options);
@@ -1931,12 +1947,21 @@ var RichClayBundle = (() => {
           });
         });
       });
+      let stopped = false;
+      const stop = () => {
+        if (stopped) return;
+        stopped = true;
+        observer.disconnect();
+        if (watchedWindows.get(win) === stop) watchedWindows.delete(win);
+      };
       observer.observe(win.document.documentElement || win.document, {
         childList: true,
         subtree: true,
         attributes: true,
         attributeFilter: ["editable", "clay-editable", "data-richclay", "richclay"]
       });
+      watchedWindows.set(win, stop);
+      return stop;
     }
     static registerButton(def) {
       validateButton(def);
