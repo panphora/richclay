@@ -128,13 +128,22 @@ import {
 } from "./a11y.js";
 
 const instances = new WeakMap();
-const autoInitWindows = new WeakSet();
-const watchedWindows = new WeakSet();
+const autoInitWindows = new WeakMap();
+const watchedWindows = new WeakMap();
 const globalRegistry = createDefaultRegistry();
 const KEEP_FOCUS = Symbol("richclay-keep-focus");
 const ROOT_TRANSFER_EVENTS = ["cut", "paste", "drop"];
 const MODIFIER_ORDER = ["Alt", "Ctrl", "Meta", "Shift"];
 let dialogSeq = 0;
+
+// A real ClayJS core publishes its committed mode before it evaluates any plugin,
+// and its richclay plugin is one of them. From that moment the ClayJS adapter owns
+// the instances and the observer that mounts them, so richclay's own auto-init has
+// to step aside: two owners mount, watch and destroy the same regions. Standalone
+// pages and hyperclayjs publish no clay.mode, so they keep self-starting.
+function isManagedByClayJS(win) {
+  return typeof win.clay?.mode === "string";
+}
 
 const defaultOptions = {
   toolbar: "standard",
@@ -256,24 +265,36 @@ export default class RichClay {
   }
 
   static autoInit(win = typeof window !== "undefined" ? window : undefined) {
-    if (!win || !win.document || autoInitWindows.has(win)) return;
-    autoInitWindows.add(win);
+    if (!win || !win.document) return () => {};
+    const existing = autoInitWindows.get(win);
+    if (existing) return existing;
+
+    let cancelled = false;
+    let stopWatching = null;
     const run = () => {
+      if (cancelled || isManagedByClayJS(win)) return;
       if (shouldUseHyperclay({}, win) && isHyperclayEditMode(win)) {
         RichClay.init();
-        RichClay.watch(win);
+        stopWatching = RichClay.watch(win);
       }
     };
+    const stop = () => {
+      cancelled = true;
+      stopWatching?.();
+    };
+    autoInitWindows.set(win, stop);
     if (win.document.readyState === "loading") {
       win.document.addEventListener("DOMContentLoaded", run, { once: true });
     } else {
       run();
     }
+    return stop;
   }
 
   static watch(win = typeof window !== "undefined" ? window : undefined, options = {}) {
-    if (!win || !win.document || watchedWindows.has(win)) return;
-    watchedWindows.add(win);
+    if (!win || !win.document) return () => {};
+    const existing = watchedWindows.get(win);
+    if (existing) return existing;
 
     const mount = element => {
       if (!isMountable(element)) return;
@@ -311,12 +332,21 @@ export default class RichClay {
       });
     });
 
+    let stopped = false;
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      observer.disconnect();
+      if (watchedWindows.get(win) === stop) watchedWindows.delete(win);
+    };
     observer.observe(win.document.documentElement || win.document, {
       childList: true,
       subtree: true,
       attributes: true,
       attributeFilter: ["editable", "clay-editable", "data-richclay", "richclay"]
     });
+    watchedWindows.set(win, stop);
+    return stop;
   }
 
   static registerButton(def) {

@@ -9,7 +9,10 @@ if (g && !g.Squire) g.Squire = Squire;
 if (g && !g.DOMPurify) g.DOMPurify = DOMPurify;
 
 setRichClayStyles(css);
-RichClay.autoInit();
+// A page with a real ClayJS core defers auto-init to the ClayJS richclay adapter,
+// which owns its instances and the observer that mounts them. The handle stops
+// whatever auto-init itself started, on the pages where it does start.
+const stopAutoWatch = RichClay.autoInit();
 
 export default RichClay;
-export { RichClay };
+export { RichClay, stopAutoWatch };
