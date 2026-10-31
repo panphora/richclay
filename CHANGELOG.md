@@ -32,11 +32,17 @@
 
 ## [Unreleased]
 
-### Fixed
-- Prevent link clicks and middle-clicks from navigating away while a RichClay editor is active.
+## [0.7.0] - 2026-10-30
+
+### Added
+- `RichClay.watch` returns a stop function that ends watching, and calling it more than once is safe.
 
 ### Changed
 - Use the selected house pilcrow and clear-formatting toolbar icons, and add paragraph, heading, quote, and code icons to the block-style menu. Other toolbar icons retain their Phosphor regular drawings.
+- When ClayJS manages the page, RichClay's auto-init leaves setup to ClayJS.
+
+### Fixed
+- Prevent link clicks and middle-clicks from navigating away while a RichClay editor is active.
 
 ## [0.5.0] - 2026-09-04
 
